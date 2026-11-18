@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>HOME TRACKER</title>
+  <meta name="theme-color" content="#f3f2ee" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121315" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Home">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="/icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;700&display=swap">
+</head>
+<body>
+<div class="app">
+  <div class="view" id="loading"><p class="empty">Loading…</p></div>
+
+  <!-- Sign in -->
+  <div class="view" id="auth" hidden>
+    <header class="top">
+      <div class="titles">
+        <h1>HOME TRACKER</h1>
+        <p class="sub">Sign in to see your policies, bills and renewal dates on your phone and laptop.</p>
+      </div>
+    </header>
+    <form class="panel" id="authForm">
+      <div class="field">
+        <label for="authEmail">Email</label>
+        <input type="email" id="authEmail" autocomplete="email" required>
+      </div>
+      <div class="field">
+        <label for="authPass">Password</label>
+        <input type="password" id="authPass" autocomplete="current-password" minlength="6" required>
+      </div>
+      <button class="btn primary" type="submit" id="authSubmit">Sign in</button>
+      <button class="btn quiet" type="button" id="authToggle">New here? Create an account</button>
+      <p class="note" id="authMsg" hidden></p>
+    </form>
+  </div>
+
+  <!-- Home: totals, what's coming up, and everything by area -->
+  <div class="view" id="home" hidden>
+    <header class="top">
+      <div class="titles">
+        <h1 id="homeName">HOME TRACKER</h1>
+      </div>
+      <div class="acts">
+        <button class="btn primary" id="addItem" type="button">+ Add</button>
+        <button class="gear" id="openSettings" type="button" aria-label="Settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg>
+        </button>
+      </div>
+    </header>
+    <div class="dash">
+      <section class="totals" id="totals"></section>
+      <section class="coming" id="coming"></section>
+    </div>
+    <div class="filters">
+      <label class="sr" for="search">Search</label>
+      <input type="search" id="search" placeholder="Search provider, policy number, car…" autocomplete="off">
+      <div class="chips" id="areaChips" role="group" aria-label="Show"></div>
+    </div>
+    <div class="plist" id="list"></div>
+    <section id="archiveWrap" hidden>
+      <button class="btn quiet" id="toggleArchive" type="button"></button>
+      <div class="plist" id="archiveList" hidden></div>
+    </section>
+  </div>
+
+  <!-- Import from Google Sheets -->
+  <div class="view" id="import" hidden>
+    <button class="btn quiet back" data-nav="settings" type="button">‹ Settings</button>
+    <main class="panel">
+      <h2>Import from a spreadsheet</h2>
+      <ol class="steps">
+        <li>In Google Sheets, open your sheet and choose <strong>File › Download › Comma-separated values (.csv)</strong>.</li>
+        <li>Tap <strong>Choose CSV file</strong> below and pick the download. Or select the cells in the sheet, copy, and paste them in the box.</li>
+        <li>Check each column is matched to the right thing, then import.</li>
+      </ol>
+      <input type="file" id="csvFile" accept=".csv,.tsv,.txt,text/csv,text/plain" hidden>
+      <div class="row"><button class="btn primary" id="csvChoose" type="button">Choose CSV file</button></div>
+      <label class="sr" for="csvText">Spreadsheet text</label>
+      <textarea id="csvText" rows="4" placeholder="Or paste cells from your sheet here, including the heading row"></textarea>
+      <div class="row"><button class="btn" id="csvRead" type="button">Read pasted cells</button></div>
+      <section class="sect" id="mapSect" hidden>
+        <h3>Match your columns</h3>
+        <p class="note">We've guessed which column is which. Change any that are wrong, or set them to “Not in my sheet”.</p>
+        <div class="mapgrid" id="mapGrid"></div>
+        <h3 id="previewHead">Preview</h3>
+        <div class="tablewrap"><table class="preview" id="preview"></table></div>
+        <p class="note" id="previewNote"></p>
+        <div class="row"><button class="btn primary" id="csvImport" type="button">Import</button></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Settings -->
+  <div class="view" id="settings" hidden>
+    <button class="btn quiet back" data-nav="home" type="button">‹ Home</button>
+    <main class="panel">
+      <h2>Settings</h2>
+      <p class="note" id="demoNote" hidden>Demo mode: everything is saved on this device only. Connect the app to Supabase to sync between your phone and laptop and to share.</p>
+      <section class="sect" id="acctSect">
+        <h3>Account</h3>
+        <p class="sub" id="acctEmail"></p>
+        <button class="btn" id="signOut" type="button">Sign out</button>
+      </section>
+      <section class="sect">
+        <h3>Household</h3>
+        <form class="inline-form" id="hhForm">
+          <label class="sr" for="hhName">Household name</label>
+          <input type="text" id="hhName" maxlength="60" placeholder="e.g. 12 Oak Road">
+          <button class="btn" type="submit">Rename</button>
+        </form>
+        <p class="note" id="hhMembers"></p>
+      </section>
+      <section class="sect" id="shareSect">
+        <h3>Share with someone</h3>
+        <p class="note">Give them this code. Once they've joined, you both see and edit the same list.</p>
+        <div class="sharebox" id="sharebox" hidden><p class="code" id="shareCode"></p></div>
+        <div class="row"><button class="btn primary" id="shareMake" type="button">Show share code</button></div>
+        <h3>Join someone else's household</h3>
+        <form class="inline-form" id="joinForm">
+          <label class="sr" for="joinCode">Share code</label>
+          <input type="text" id="joinCode" placeholder="Share code" autocomplete="off" autocapitalize="characters" maxlength="12">
+          <button class="btn primary" type="submit">Join</button>
+        </form>
+      </section>
+      <section class="sect">
+        <h3>Notifications</h3>
+        <p class="note" id="pushStatus"></p>
+        <div class="row">
+          <button class="btn primary" id="pushOn" type="button" hidden>Turn on notifications</button>
+          <button class="btn" id="pushTest" type="button" hidden>Show a test notification</button>
+        </div>
+      </section>
+      <section class="sect">
+        <h3>Spreadsheet</h3>
+        <p class="note">Bring in what's in your Google Sheet, or download everything here as a spreadsheet to keep a copy.</p>
+        <div class="row">
+          <button class="btn primary" data-nav="import" type="button">Import from Google Sheets</button>
+          <button class="btn" id="exportCsv" type="button">Download as CSV</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <p class="note" id="note" hidden></p>
+</div>
+
+<!-- Add or edit one item -->
+<div class="sheet-wrap" id="itemSheet" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <div class="sheet-head">
+      <div><h2 id="sheetTitle">Add</h2><p class="sub" id="sheetSub"></p></div>
+      <button class="btn quiet" id="sheetClose" type="button">Close</button>
+    </div>
+    <form class="iform" id="itemForm">
+      <div class="field wide">
+        <label for="fCategory">Type</label>
+        <select id="fCategory"></select>
+      </div>
+      <div class="field wide">
+        <label for="fTitle">Name</label>
+        <input type="text" id="fTitle" maxlength="120" required>
+      </div>
+      <div class="field">
+        <label for="fProvider">Provider</label>
+        <input type="text" id="fProvider" maxlength="120" placeholder="e.g. Admiral">
+      </div>
+      <div class="field">
+        <label for="fCovers">Covers</label>
+        <input type="text" id="fCovers" maxlength="120" placeholder="e.g. Ford Focus AB12 CDE">
+      </div>
+      <div class="field wide">
+        <label for="fReference">Policy or account number</label>
+        <input type="text" id="fReference" maxlength="120" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="fCost">Cost (£)</label>
+        <input type="number" id="fCost" inputmode="decimal" min="0" step="0.01" placeholder="0.00">
+      </div>
+      <div class="field">
+        <label for="fFreq">Paid</label>
+        <select id="fFreq"></select>
+      </div>
+      <div class="field">
+        <label for="fDate" id="fDateLabel">Renewal date</label>
+        <input type="date" id="fDate">
+      </div>
+      <div class="field">
+        <label for="fRemind">Remind me</label>
+        <select id="fRemind"></select>
+      </div>
+      <label class="tick wide"><input type="checkbox" id="fAuto"> Renews automatically</label>
+      <div class="field">
+        <label for="fPhone">Phone</label>
+        <input type="tel" id="fPhone" maxlength="40">
+      </div>
+      <div class="field">
+        <label for="fWebsite">Website</label>
+        <input type="text" id="fWebsite" maxlength="300" inputmode="url" placeholder="e.g. admiral.com">
+      </div>
+      <div class="field wide">
+        <label for="fNotes">Notes</label>
+        <textarea id="fNotes" rows="3" maxlength="4000"></textarea>
+      </div>
+      <div class="row wide"><button class="btn primary" type="submit" id="itemSave">Save</button></div>
+    </form>
+
+    <section class="sect" id="renewSect" hidden>
+      <h3>Renewed?</h3>
+      <form class="renew" id="renewForm" hidden>
+        <div class="field">
+          <label for="rDate">Next renewal date</label>
+          <input type="date" id="rDate" required>
+        </div>
+        <div class="field">
+          <label for="rCost">New cost (£)</label>
+          <input type="number" id="rCost" inputmode="decimal" min="0" step="0.01">
+        </div>
+        <div class="field">
+          <label for="rProvider">Provider</label>
+          <input type="text" id="rProvider" maxlength="120">
+        </div>
+        <div class="row"><button class="btn primary" type="submit">Save renewal</button><button class="btn quiet" type="button" id="renewCancel">Cancel</button></div>
+        <p class="note">The old price and provider are added to the notes, so you can compare next year.</p>
+      </form>
+      <div class="row" id="renewBtnRow"><button class="btn" id="renewOpen" type="button">Mark as renewed</button></div>
+    </section>
+
+    <section class="sect" id="docsSect" hidden>
+      <h3>Documents</h3>
+      <p class="note">Policy documents, certificates, receipts. Photos or PDFs, up to 10 MB each.</p>
+      <div class="docs" id="docs"></div>
+      <input type="file" id="docFile" accept="image/*,application/pdf" multiple hidden>
+    </section>
+
+    <section class="sect" id="dangerSect" hidden>
+      <div class="row">
+        <button class="btn" id="archiveItem" type="button"></button>
+        <button class="btn danger" id="deleteItem" type="button">Delete</button>
+      </div>
+    </section>
+  </div>
+</div>
+<div class="viewer" id="viewer" hidden>
+  <img id="viewerImg" alt="Document">
+  <div class="vbar">
+    <button class="btn danger" id="viewerDel" type="button">Delete</button>
+    <button class="btn primary" id="viewerClose" type="button">Close</button>
+  </div>
+</div>
+<div id="toasts" aria-live="polite"></div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
