@@ -2,7 +2,7 @@ import "./style.css";
 import { store } from "./store.js";
 import * as push from "./push.js";
 import { AREAS, CATEGORIES, FREQUENCIES, category, areaOf, guessCategory } from "./categories.js";
-import { FIELDS, parseTable, guessMapping, rowsToItems, toCsv } from "./csv.js";
+import { FIELDS, parseTable, guessMapping, rowsToItems } from "./csv.js";
 import { billIcon } from "./billIcons.js";
 
 const $ = (s) => document.querySelector(s);
@@ -1066,21 +1066,48 @@ $("#joinForm").addEventListener("submit", async (e) => {
 $("#pushOn").onclick = async () => { try { await push.enable(store); renderSettings(); toast("Notifications are on"); } catch (err) { fail(err); } };
 $("#pushTest").onclick = () => push.test().catch(fail);
 
-$("#exportCsv").onclick = () => {
-  const uk = (iso) => (iso ? iso.split("-").reverse().join("/") : "");
-  const head = ["Area", "Group", "Type", "Name", "Status", "Provider", "Covers", "Policy or account number", "Cost", "Paid",
-    "Started", "Renewal or expiry date", "Remind on", "Auto-renews", "Phone", "Website", "Notes"];
-  const rows = items.slice().sort((a, b) => nameOf(a).localeCompare(nameOf(b)) || byNewest(a, b)).map((i) => [
-    areaById(areaIdOf(i)).label, groupOf(i)?.name || "", category(i.category).label, i.title,
-    i.groupId ? (i.archivedAt ? "Past" : "Current") : (i.archivedAt ? "Archived" : ""),
-    i.provider, i.covers, i.reference, i.cost, i.frequency, uk(i.startDate), uk(i.renewalDate), uk(i.remindOn),
-    i.autoRenew ? "Yes" : "No", i.phone, i.website, i.notes,
-  ]);
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob(["\uFEFF" + toCsv([head, ...rows])], { type: "text/csv" }));
-  a.download = `home-tracker-${todayIso()}.csv`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+$("#exportBackup").onclick = async () => {
+  const btn = $("#exportBackup");
+  btn.disabled = true;
+  try {
+    const X = await import("xlsx");
+    const uk = (iso) => (iso ? iso.split("-").reverse().join("/") : "");
+    const sheet = (rows, widths) => { const ws = X.utils.aoa_to_sheet(rows); ws["!cols"] = widths.map((wch) => ({ wch })); return ws; };
+    const wb = X.utils.book_new();
+
+    const head = ["Area", "Group", "Vehicle", "Type", "Name", "Status", "Provider", "Covers", "Policy or account number", "Cost (£)", "Paid",
+      "Started", "Renewal or expiry date", "Remind on", "Auto-renews", "Phone", "Website", "Notes", "Documents"];
+    const rows = items.slice().sort((a, b) => nameOf(a).localeCompare(nameOf(b)) || byNewest(a, b)).map((i) => [
+      areaById(areaIdOf(i)).label, groupOf(i)?.name || "", vehicleById(groupOf(i)?.vehicleId)?.registration || "",
+      category(i.category).label, i.title,
+      i.groupId ? (i.archivedAt ? "Past" : "Current") : (i.archivedAt ? "Archived" : ""),
+      i.provider || "", i.covers || "", i.reference || "", i.cost ?? "", i.frequency, uk(i.startDate), uk(i.renewalDate), uk(i.remindOn),
+      i.autoRenew ? "Yes" : "No", i.phone || "", i.website || "", i.notes || "", i.docs.map((d) => d.name).join(", "),
+    ]);
+    X.utils.book_append_sheet(wb, sheet([head, ...rows], [10, 22, 10, 22, 22, 9, 20, 30, 22, 9, 9, 11, 11, 11, 6, 14, 20, 60, 30]), "Renewals");
+
+    const months = [...new Set(lines.map((l) => l.month))].sort().reverse();
+    const summary = months.map((m) => {
+      const ls = monthLines(m), tin = sum(ls.filter((l) => l.kind === "in")), tout = sum(ls.filter((l) => l.kind === "out"));
+      return [monthLabel(m), tin, tout, Math.round((tin - tout) * 100) / 100];
+    });
+    X.utils.book_append_sheet(wb, sheet([["Month", "Coming in (£)", "Going out (£)", "Left over (£)"], ...summary], [16, 14, 14, 14]), "Budget by month");
+    const budget = months.flatMap((m) => monthLines(m).sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "in" ? -1 : 1))
+      .map((l) => [monthLabel(m), l.kind === "in" ? "Coming in" : "Going out", l.name, l.amount]));
+    X.utils.book_append_sheet(wb, sheet([["Month", "In or out", "What", "Amount (£)"], ...budget], [16, 11, 24, 11]), "Budget lines");
+
+    const vrows = vehicles.flatMap((v) => [
+      ...[["Registration", v.registration], ["Make", v.make], ["Model", v.model], ["Nickname", v.nickname]].filter(([, x]) => x),
+      ...v.details.map((d) => [d.label, d.value]),
+      ...(v.notes ? [["Notes", v.notes]] : []),
+      ["", ""],
+    ].map(([k, x]) => [k ? v.registration : "", k, x]));
+    if (vrows.length) X.utils.book_append_sheet(wb, sheet([["Vehicle", "Detail", "Value"], ...vrows], [12, 32, 50]), "Vehicles");
+
+    X.writeFile(wb, `home-tracker-backup-${todayIso()}.xlsx`, { compression: true });
+    toast("Backup downloaded");
+  } catch (err) { fail(err); }
+  btn.disabled = false;
 };
 
 /* ---------- Import ---------- */

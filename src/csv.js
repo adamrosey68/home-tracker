@@ -24,14 +24,6 @@ export function parseTable(text) {
   return rows.map((r) => r.map((c) => c.trim())).filter((r) => r.some(Boolean));
 }
 
-export function toCsv(rows) {
-  const q = (v) => {
-    const s = v == null ? "" : String(v);
-    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  return rows.map((r) => r.map(q).join(",")).join("\r\n");
-}
-
 /* What each column in a sheet could be. `match` is tried against the header text. */
 export const FIELDS = [
   { key: "title", label: "What it is", match: /^(item|name|what|policy|title|description|insurance|service)$|item|what|title|description/ },
