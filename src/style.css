@@ -208,6 +208,32 @@ ul { list-style: none; margin: 0; padding: 0; }
 .hprov { grid-area: prov; font-weight: 600; overflow-wrap: anywhere; }
 .hdate { grid-area: date; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .hcost { grid-area: cost; font-variant-numeric: tabular-nums; }
+.gnew { display: flex; flex-direction: column; gap: 8px; }
+.gnew .field { max-width: 420px; }
+
+/* Vehicles */
+.vehicle { display: flex; flex-direction: column; gap: 12px; }
+.vcard { max-width: 760px; }
+.vgroups { padding-left: 14px; border-left: 3px solid var(--a-car-soft); }
+.vhead { display: flex; align-items: center; gap: 12px; padding: 12px 6px 12px 14px; }
+.vtitle { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.vtitle .pname { font-family: var(--font-display); font-weight: 700; font-size: 18px; }
+.plate { flex: none; padding: 4px 10px; border-radius: 6px; background: #f6c400; color: #111; border: 2px solid #111;
+  font-family: "Arial Narrow", "Roboto Condensed", Arial, sans-serif; font-weight: 700; font-size: 20px; letter-spacing: 0.06em; white-space: nowrap; }
+.vstatus { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 14px 12px; }
+.vchip { font-size: 13px; font-weight: 600; padding: 3px 10px; border-radius: 12px; background: var(--ok-soft); color: var(--ok); }
+.vdl { margin: 0; padding: 0 14px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; }
+.vdl div { display: flex; flex-direction: column; min-width: 0; }
+.vdl dt { font-size: 12px; color: var(--muted); }
+.vdl dd { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.vnotes { margin: 0; padding: 0 14px 12px; font-size: 14px; color: var(--muted); white-space: pre-line; }
+.vacts { border-top: 1px solid var(--line); padding: 4px 4px; }
+.vacts .btn { color: var(--accent); font-weight: 600; }
+.vdetails { display: flex; flex-direction: column; gap: 8px; }
+#vRows { display: flex; flex-direction: column; gap: 6px; }
+.vrow { display: grid; grid-template-columns: 1fr 1.3fr 40px; gap: 6px; }
+.vrow .del { width: 40px; height: 44px; border: 0; background: none; color: var(--muted); font-size: 20px; }
+@media (max-width: 420px) { .vdl { grid-template-columns: 1fr; } }
 #archiveWrap { display: flex; flex-direction: column; gap: 12px; }
 #toggleArchive { align-self: flex-start; padding-left: 0; }
 #archiveList .pcard { opacity: .75; }

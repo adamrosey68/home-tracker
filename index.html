@@ -257,6 +257,47 @@
     </section>
   </div>
 </div>
+<!-- Add or edit a vehicle -->
+<div class="sheet-wrap" id="vehicleSheet" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="vSheetTitle">
+    <div class="sheet-head">
+      <div><h2 id="vSheetTitle">Add a vehicle</h2><p class="sub">The car's own details. Tax, insurance and so on go in groups under it.</p></div>
+      <button class="btn quiet" id="vClose" type="button">Close</button>
+    </div>
+    <form class="iform" id="vehicleForm">
+      <div class="field">
+        <label for="vReg">Registration</label>
+        <input type="text" id="vReg" maxlength="12" required autocapitalize="characters" autocomplete="off" placeholder="e.g. AB12 CDE">
+      </div>
+      <div class="field">
+        <label for="vNick">Nickname</label>
+        <input type="text" id="vNick" maxlength="40" placeholder="e.g. Adam's car">
+      </div>
+      <div class="field">
+        <label for="vMake">Make</label>
+        <input type="text" id="vMake" maxlength="40">
+      </div>
+      <div class="field">
+        <label for="vModel">Model</label>
+        <input type="text" id="vModel" maxlength="60">
+      </div>
+      <div class="wide vdetails">
+        <h3>Details</h3>
+        <p class="note">Anything you want to keep: colour, fuel, engine size, logbook date, lease company…</p>
+        <div id="vRows"></div>
+        <div class="row"><button class="btn" type="button" id="vAddRow">+ Add a detail</button></div>
+      </div>
+      <div class="field wide">
+        <label for="vNotes">Notes</label>
+        <textarea id="vNotes" rows="3" maxlength="4000"></textarea>
+      </div>
+      <div class="row wide"><button class="btn primary" type="submit" id="vSave">Save</button></div>
+    </form>
+    <section class="sect" id="vDangerSect" hidden>
+      <div class="row"><button class="btn danger" id="vDelete" type="button">Delete vehicle</button></div>
+    </section>
+  </div>
+</div>
 <div class="viewer" id="viewer" hidden>
   <img id="viewerImg" alt="Document">
   <div class="vbar">

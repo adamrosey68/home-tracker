@@ -23,6 +23,11 @@ let newGroupArea = null;
 let editingGroup = null;
 let groupDeleteArmed = false;
 let pricing = null;
+let vehicles = [];
+let newGroupVehicle = null;
+let editingVehicle = null;
+let vehicleDeleteArmed = false;
+const openVehicleDetails = new Set();
 const openHistory = new Set();
 let importRows = null, importMap = {};
 
@@ -54,7 +59,13 @@ const groupById = (id) => groups.find((g) => g.id === id);
 const groupOf = (i) => (i.groupId ? groupById(i.groupId) : null);
 const areaIdOf = (i) => groupOf(i)?.area || areaOf(i.category).id;
 const areaById = (id) => AREAS.find((a) => a.id === id);
-const nameOf = (i) => groupOf(i)?.name || i.title;
+const vehicleById = (id) => vehicles.find((v) => v.id === id);
+function nameOf(i) {
+  const g = groupOf(i);
+  if (!g) return i.title;
+  const v = vehicleById(g.vehicleId);
+  return v ? `${g.name} · ${v.registration}` : g.name;
+}
 const isPast = (i) => !!(i.groupId && i.archivedAt);
 const groupItems = (g) => items.filter((i) => i.groupId === g.id);
 const byNewest = (a, b) => (b.renewalDate || b.startDate || "").localeCompare(a.renewalDate || a.startDate || "");
@@ -197,6 +208,7 @@ function groupCard(g) {
     ${renaming ? `<form class="gedit" data-group-rename="${g.id}">
       <label class="sr" for="gname-${g.id}">Group name</label>
       <input type="text" id="gname-${g.id}" value="${esc(g.name)}" maxlength="60">
+      ${vehicleSelect(g.area, g.vehicleId, `gveh-${g.id}`)}
       <div class="row"><button class="btn primary" type="submit">Save</button>
         <button class="btn danger${groupDeleteArmed ? " confirm" : ""}" type="button" data-group-delete="${g.id}">${groupDeleteArmed ? `Tap again to delete it and its ${all.length} entr${all.length === 1 ? "y" : "ies"}` : "Delete group"}</button>
         <button class="btn quiet" type="button" data-group-cancel>Cancel</button></div>
@@ -226,27 +238,80 @@ function groupCard(g) {
   </section>`;
 }
 
+/* ---------- Vehicles ---------- */
+
+function vehicleSelect(area, selected, id) {
+  if (area !== "car" || !vehicles.length) return "";
+  return `<div class="field"><label for="${id}">For</label><select id="${id}" data-vehicle-pick>
+    <option value="">Not for a particular vehicle</option>
+    ${vehicles.map((v) => `<option value="${v.id}"${v.id === selected ? " selected" : ""}>${esc([v.registration, v.make, v.model].filter(Boolean).join(" "))}</option>`).join("")}
+  </select></div>`;
+}
+const detail = (v, re) => v.details.find((d) => re.test(d.label))?.value;
+const vehicleMatches = (v) => !q() || [v.registration, v.nickname, v.make, v.model, v.notes, ...v.details.map((d) => d.value)]
+  .some((x) => x && x.toLowerCase().includes(q()));
+
+function vehicleBlock(v, gs) {
+  const open = openVehicleDetails.has(v.id);
+  const title = [v.make, v.model].filter(Boolean).join(" ") || "Vehicle";
+  const sub = [v.nickname, detail(v, /colou?r/i), detail(v, /fuel/i), detail(v, /year of manufacture/i)].filter(Boolean).join(" · ");
+  const status = gs.map((g) => {
+    const now = groupItems(g).find((i) => !i.archivedAt);
+    return now?.renewalDate ? `<span class="vchip">${esc(g.name)}: ${esc(prettyDate(now.renewalDate))}</span>` : "";
+  }).join("");
+  return `<div class="vehicle">
+    <section class="pcard vcard">
+      <div class="vhead">
+        <span class="plate">${esc(v.registration)}</span>
+        <div class="vtitle"><span class="pname">${esc(title)}</span>${sub ? `<span class="isub">${esc(sub)}</span>` : ""}</div>
+        <button class="btn quiet" type="button" data-vehicle-edit="${v.id}">Edit</button>
+      </div>
+      ${status ? `<div class="vstatus">${status}</div>` : ""}
+      ${v.details.length ? `<div class="ghist">
+        <button class="hfold" type="button" data-vdetails="${v.id}" aria-expanded="${open}"><span class="caret">${open ? "▾" : "▸"}</span> Details <span class="cnt">${v.details.length}</span></button>
+        ${open ? `<dl class="vdl">${v.details.map((d) => `<div><dt>${esc(d.label)}</dt><dd>${esc(d.value)}</dd></div>`).join("")}</dl>` : ""}
+      </div>` : ""}
+      ${v.notes ? `<p class="vnotes">${esc(v.notes)}</p>` : ""}
+      <div class="vacts"><button class="btn quiet" type="button" data-new-group="car" data-for-vehicle="${v.id}">+ Group for this vehicle</button></div>
+    </section>
+    ${gs.length ? `<div class="glist vgroups">${gs.map(groupCard).join("")}</div>` : ""}
+  </div>`;
+}
+
 function areaSection(a) {
-  const gs = groups.filter((g) => g.area === a.id && groupMatches(g));
+  const all = groups.filter((g) => g.area === a.id);
+  const vs = a.id === "car" ? vehicles : [];
+  const vBlocks = vs.map((v) => {
+    const mine = all.filter((g) => g.vehicleId === v.id);
+    if (vehicleMatches(v)) return vehicleBlock(v, mine);
+    const shown = mine.filter(groupMatches);
+    return shown.length ? vehicleBlock(v, shown) : "";
+  }).join("");
+  const gs = all.filter((g) => !vehicleById(g.vehicleId) && groupMatches(g));
   const loose = items.filter((i) => !i.groupId && !i.archivedAt && areaIdOf(i) === a.id && (!q() || textMatch(i))).sort(sortItems);
   const adding = newGroupArea === a.id;
-  if (q() && !gs.length && !loose.length) return "";
+  if (q() && !gs.length && !loose.length && !vBlocks) return "";
   return `<section class="area">
     <div class="ahead"><span class="aicon ${a.id}">${svg(a.icon)}</span><h2>${esc(a.label)}</h2>
+      ${a.id === "car" ? `<button class="btn quiet" type="button" data-vehicle-new>+ Vehicle</button>` : ""}
       <button class="btn quiet" type="button" data-new-group="${a.id}">+ Group</button></div>
-    ${adding ? `<form class="inline-form" id="groupForm">
-      <label class="sr" for="groupName">Group name</label>
-      <input type="text" id="groupName" maxlength="60" placeholder="e.g. Buildings and contents" autocomplete="off">
-      <button class="btn primary" type="submit">Create</button>
-      <button class="btn quiet" type="button" data-group-cancel>Cancel</button>
+    ${adding ? `<form class="gnew" id="groupForm">
+      <div class="inline-form">
+        <label class="sr" for="groupName">Group name</label>
+        <input type="text" id="groupName" maxlength="60" placeholder="${a.id === "car" ? "e.g. Insurance" : "e.g. Buildings and contents"}" autocomplete="off">
+        <button class="btn primary" type="submit">Create</button>
+        <button class="btn quiet" type="button" data-group-cancel>Cancel</button>
+      </div>
+      ${vehicleSelect(a.id, newGroupVehicle, "groupVehicle")}
     </form>` : ""}
+    ${vBlocks}
     <div class="glist">
       ${gs.map(groupCard).join("")}
       ${loose.length ? `<section class="pcard">
         <div class="phdr"><span class="pname">${gs.length ? "Not in a group" : "Items"}</span>
           <button class="btn quiet addin" type="button" data-add="${a.id}">+ Add</button></div>
         <ul class="irows">${loose.map(itemRow).join("")}</ul></section>` : ""}
-      ${!gs.length && !loose.length && !adding ? `<p class="empty">No groups yet. Tap “+ Group” to start one.</p>` : ""}
+      ${!gs.length && !loose.length && !adding && !vBlocks ? `<p class="empty">No groups yet. Tap “+ Group” to start one.</p>` : ""}
     </div>
   </section>`;
 }
@@ -256,12 +321,13 @@ function renderHome() {
   document.title = household?.name || "Home Tracker";
   renderTotals();
   renderComing();
-  const count = (id) => groups.filter((g) => g.area === id).length + items.filter((i) => !i.groupId && !i.archivedAt && areaIdOf(i) === id).length;
+  const count = (id) => groups.filter((g) => g.area === id).length + items.filter((i) => !i.groupId && !i.archivedAt && areaIdOf(i) === id).length
+    + (id === "car" ? vehicles.length : 0);
   $("#areaChips").innerHTML = [{ id: "all", label: "All" }, ...AREAS].map((a) => {
     const n = a.id === "all" ? AREAS.reduce((s, x) => s + count(x.id), 0) : count(a.id);
     return `<button type="button" class="chip" data-area="${a.id}" aria-pressed="${filter.area === a.id}">${esc(a.label)} <span class="cnt">${n}</span></button>`;
   }).join("");
-  const anything = items.length || groups.length || newGroupArea;
+  const anything = items.length || groups.length || vehicles.length || newGroupArea;
   $(".filters").hidden = !anything;
   $("#list").innerHTML = anything
     ? AREAS.filter((a) => filter.area === "all" || filter.area === a.id).map(areaSection).join("") || `<p class="empty">Nothing matches that search.</p>`
@@ -305,8 +371,16 @@ document.addEventListener("click", async (e) => {
     if (openHistory.has(id)) openHistory.delete(id); else openHistory.add(id);
     return renderHome();
   }
+  if ((b = t("[data-vehicle-new]"))) return openVehicle(null);
+  if ((b = t("[data-vehicle-edit]"))) return openVehicle(b.dataset.vehicleEdit);
+  if ((b = t("[data-vdetails]"))) {
+    const id = b.dataset.vdetails;
+    if (openVehicleDetails.has(id)) openVehicleDetails.delete(id); else openVehicleDetails.add(id);
+    return renderHome();
+  }
   if ((b = t("[data-new-group]"))) {
     newGroupArea = b.dataset.newGroup;
+    newGroupVehicle = b.dataset.forVehicle || null;
     filter.area = filter.area === "all" || filter.area === newGroupArea ? filter.area : newGroupArea;
     renderHome();
     return $("#groupForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -334,7 +408,7 @@ document.addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = $("#groupName").value.trim();
     if (!name) return;
-    const g = { id: uid(), householdId: household.id, area: newGroupArea, name, position: Date.now() };
+    const g = { id: uid(), householdId: household.id, area: newGroupArea, name, position: Date.now(), vehicleId: $("#groupVehicle")?.value || null };
     groups.push(g);
     newGroupArea = null;
     renderHome();
@@ -364,12 +438,96 @@ document.addEventListener("submit", async (e) => {
     const g = groupById(rename.dataset.groupRename);
     const name = rename.querySelector("input").value.trim();
     if (!name) return;
-    g.name = name;
+    const pick = rename.querySelector("[data-vehicle-pick]");
+    const patch = pick ? { name, vehicleId: pick.value || null } : { name };
+    Object.assign(g, patch);
     editingGroup = null;
     renderHome();
-    try { await store.updateGroup(g.id, { name }); } catch (err) { fail(err); await reload(); }
+    try { await store.updateGroup(g.id, patch); } catch (err) { fail(err); await reload(); }
   }
 });
+
+/* ---------- Vehicle sheet ---------- */
+
+function vehicleRowHtml(d = { label: "", value: "" }) {
+  return `<div class="vrow">
+    <input type="text" class="vl" maxlength="60" placeholder="e.g. Colour" value="${esc(d.label)}" aria-label="Detail">
+    <input type="text" class="vv" maxlength="200" placeholder="e.g. Grey" value="${esc(d.value)}" aria-label="Value">
+    <button type="button" class="del" data-vrow-del aria-label="Remove">×</button>
+  </div>`;
+}
+function openVehicle(id) {
+  editingVehicle = id;
+  vehicleDeleteArmed = false;
+  const v = id ? vehicleById(id) : null;
+  $("#vSheetTitle").textContent = v ? v.registration : "Add a vehicle";
+  $("#vReg").value = v?.registration || "";
+  $("#vNick").value = v?.nickname || "";
+  $("#vMake").value = v?.make || "";
+  $("#vModel").value = v?.model || "";
+  $("#vNotes").value = v?.notes || "";
+  $("#vRows").innerHTML = (v?.details.length ? v.details : [{ label: "", value: "" }]).map(vehicleRowHtml).join("");
+  $("#vSave").textContent = v ? "Save changes" : "Add vehicle";
+  $("#vDangerSect").hidden = !v;
+  $("#vDelete").textContent = "Delete vehicle";
+  $("#vDelete").classList.remove("confirm");
+  $("#vehicleSheet").hidden = false;
+  document.body.classList.add("noscroll");
+  if (!v) setTimeout(() => $("#vReg").focus(), 50);
+}
+function closeVehicle() {
+  $("#vehicleSheet").hidden = true;
+  document.body.classList.remove("noscroll");
+  editingVehicle = null;
+}
+$("#vClose").onclick = closeVehicle;
+$("#vehicleSheet").addEventListener("click", (e) => {
+  if (e.target.id === "vehicleSheet") return closeVehicle();
+  const del = e.target.closest("[data-vrow-del]");
+  if (del) del.closest(".vrow").remove();
+});
+$("#vAddRow").onclick = () => {
+  $("#vRows").insertAdjacentHTML("beforeend", vehicleRowHtml());
+  $("#vRows .vrow:last-child .vl").focus();
+};
+$("#vehicleForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const registration = $("#vReg").value.trim().toUpperCase().replace(/\s+/g, " ");
+  if (!registration) return;
+  const t = (id) => $(id).value.trim() || null;
+  const details = [...$("#vRows").querySelectorAll(".vrow")]
+    .map((r) => ({ label: r.querySelector(".vl").value.trim(), value: r.querySelector(".vv").value.trim() }))
+    .filter((d) => d.label || d.value);
+  const patch = { registration, nickname: t("#vNick"), make: t("#vMake"), model: t("#vModel"), notes: t("#vNotes"), details };
+  try {
+    if (editingVehicle) {
+      Object.assign(vehicleById(editingVehicle), patch);
+      await store.updateVehicle(editingVehicle, patch);
+      toast("Saved");
+    } else {
+      const v = { id: uid(), householdId: household.id, position: Date.now(), ...patch };
+      vehicles.push(v);
+      await store.addVehicle(v);
+      toast(`Added ${registration}`);
+    }
+    closeVehicle();
+    renderHome();
+  } catch (err) { fail(err); await reload(); }
+});
+$("#vDelete").onclick = async () => {
+  if (!vehicleDeleteArmed) {
+    vehicleDeleteArmed = true;
+    $("#vDelete").textContent = "Tap again to delete (its groups are kept)";
+    $("#vDelete").classList.add("confirm");
+    return;
+  }
+  const id = editingVehicle;
+  vehicles = vehicles.filter((v) => v.id !== id);
+  for (const g of groups) if (g.vehicleId === id) g.vehicleId = null;
+  closeVehicle();
+  renderHome();
+  try { await store.deleteVehicle(id); toast("Vehicle deleted"); } catch (err) { fail(err); await reload(); }
+};
 
 /* ---------- Item sheet ---------- */
 
@@ -452,6 +610,7 @@ document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (!$("#viewer").hidden) closeViewer();
   else if (!$("#itemSheet").hidden) closeItem();
+  else if (!$("#vehicleSheet").hidden) closeVehicle();
 });
 
 $("#fCategory").addEventListener("change", () => {
@@ -868,7 +1027,7 @@ $("#authForm").addEventListener("submit", async (e) => {
 
 async function reload() {
   household = await store.household();
-  ({ items, groups } = await store.load(household.id));
+  ({ items, groups, vehicles } = await store.load(household.id));
   if (!$("#home").hidden) renderHome();
   if (editing && !$("#itemSheet").hidden) { if (sheetItem()) renderDocs(); else closeItem(); }
 }
