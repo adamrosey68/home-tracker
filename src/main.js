@@ -28,6 +28,9 @@ let newGroupVehicle = null;
 let editingVehicle = null;
 let vehicleDeleteArmed = false;
 const openVehicleDetails = new Set();
+let lines = [];
+let budgetMonth = null;
+let budgetEdit = null;
 const openHistory = new Set();
 const UI_KEY = "home-tracker-ui";
 const ui = (() => { try { return JSON.parse(localStorage.getItem(UI_KEY)) || {}; } catch { return {}; } })();
@@ -295,6 +298,64 @@ function vehicleBlock(v, gs) {
   </div>`;
 }
 
+/* ---------- Monthly budget ---------- */
+
+function focusLineForm() {
+  const input = $(".lform .lname");
+  input?.focus();
+  input?.select();
+}
+const monthLabel = (m) => new Date(dayNum(m) * 86400000).toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+const monthLines = (m) => lines.filter((l) => l.month === m).sort((a, b) => a.position - b.position);
+const sum = (ls) => Math.round(ls.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+
+function lineForm(kind, l) {
+  const id = l ? l.id : `new-${kind}`;
+  return `<form class="lform" data-line-form="${id}" data-kind="${kind}">
+    <label class="sr" for="ln-${id}">What</label>
+    <input type="text" id="ln-${id}" class="lname" maxlength="80" placeholder="${kind === "in" ? "e.g. Salary" : "e.g. Water"}" value="${esc(l?.name)}" autocomplete="off" required>
+    <label class="sr" for="la-${id}">Amount (£)</label>
+    <input type="number" id="la-${id}" class="lamt" inputmode="decimal" min="0" step="0.01" placeholder="£" value="${l ? l.amount : ""}" required>
+    <div class="row">
+      <button class="btn primary" type="submit">${l ? "Save" : "Add"}</button>
+      ${l ? `<button class="btn danger" type="button" data-line-delete="${l.id}">Delete</button>` : ""}
+      <button class="btn quiet" type="button" data-line-cancel>Cancel</button>
+    </div>
+  </form>`;
+}
+function lineList(kind, ls) {
+  const rows = ls.map((l) => budgetEdit === l.id ? `<li>${lineForm(kind, l)}</li>`
+    : `<li><button type="button" class="lrow" data-line="${l.id}"><span class="lname">${esc(l.name)}</span><span class="lamt">${esc(gbp.format(l.amount))}</span></button></li>`).join("");
+  return `<ul class="llist">${rows}${budgetEdit === `new-${kind}` ? `<li>${lineForm(kind)}</li>` : ""}</ul>
+    ${budgetEdit === `new-${kind}` ? "" : `<button class="btn quiet ladd" type="button" data-line-new="${kind}">+ ${kind === "in" ? "Money in" : "Bill"}</button>`}`;
+}
+function budgetCard() {
+  const m = budgetMonth;
+  const ls = monthLines(m);
+  const ins = ls.filter((l) => l.kind === "in"), outs = ls.filter((l) => l.kind === "out");
+  const tin = sum(ins), tout = sum(outs), left = Math.round((tin - tout) * 100) / 100;
+  const prev = [...new Set(lines.map((l) => l.month))].filter((x) => x < m).sort().pop();
+  const empty = !ls.length && !budgetEdit;
+  return `<section class="pcard budget">
+    <div class="bhead">
+      <button class="gbtn" type="button" data-month="-1" aria-label="Previous month">‹</button>
+      <h3 class="bmonth">${esc(monthLabel(m))}</h3>
+      <button class="gbtn" type="button" data-month="1" aria-label="Next month">›</button>
+    </div>
+    ${empty ? `<div class="bempty"><p class="empty">Nothing for ${esc(monthLabel(m))} yet.</p>
+      <div class="row">${prev ? `<button class="btn primary" type="button" data-month-copy="${prev}">Copy ${esc(monthLabel(prev))}</button>` : ""}
+        <button class="btn" type="button" data-line-new="out">+ Bill</button>
+        <button class="btn" type="button" data-line-new="in">+ Money in</button></div></div>` : `
+    <div class="btotals">
+      <div><span class="blabel">Coming in</span><span class="bnum in">${esc(gbp.format(tin))}</span></div>
+      <div><span class="blabel">Going out</span><span class="bnum">${esc(gbp.format(tout))}</span></div>
+      <div><span class="blabel">Left over</span><span class="bnum ${left < 0 ? "neg" : "in"}">${esc(gbp.format(left))}</span></div>
+    </div>
+    <div class="bsect"><h3>Coming in</h3>${lineList("in", ins)}</div>
+    <div class="bsect"><h3>Going out <span class="cnt">${outs.length}</span></h3>${lineList("out", outs)}</div>`}
+  </section>`;
+}
+
 function areaSection(a) {
   const all = groups.filter((g) => g.area === a.id);
   const vs = a.id === "car" ? vehicles : [];
@@ -332,6 +393,7 @@ function areaBody(a, adding, vBlocks, gs, loose) {
       </div>
       ${vehicleSelect(a.id, newGroupVehicle, "groupVehicle")}
     </form>` : ""}
+    ${a.id === "bills" && !q() ? budgetCard() : ""}
     ${vBlocks}
     <div class="glist">
       ${gs.map(groupCard).join("")}
@@ -339,7 +401,7 @@ function areaBody(a, adding, vBlocks, gs, loose) {
         <div class="phdr"><span class="pname">${gs.length ? "Not in a group" : "Items"}</span>
           <button class="btn quiet addin" type="button" data-add="${a.id}">+ Add</button></div>
         <ul class="irows">${loose.map(itemRow).join("")}</ul></section>` : ""}
-      ${!gs.length && !loose.length && !adding && !vBlocks ? `<p class="empty">No groups yet. Tap “+ Group” to start one.</p>` : ""}
+      ${!gs.length && !loose.length && !adding && !vBlocks && a.id !== "bills" ? `<p class="empty">No groups yet. Tap “+ Group” to start one.</p>` : ""}
     </div>`;
 }
 
@@ -349,12 +411,12 @@ function renderHome() {
   renderTotals();
   renderComing();
   const count = (id) => groups.filter((g) => g.area === id).length + items.filter((i) => !i.groupId && !i.archivedAt && areaIdOf(i) === id).length
-    + (id === "car" ? vehicles.length : 0);
+    + (id === "car" ? vehicles.length : 0) + (id === "bills" && monthLines(budgetMonth).length ? 1 : 0);
   $("#areaChips").innerHTML = [{ id: "all", label: "All" }, ...AREAS].map((a) => {
     const n = a.id === "all" ? AREAS.reduce((s, x) => s + count(x.id), 0) : count(a.id);
     return `<button type="button" class="chip" data-area="${a.id}" aria-pressed="${filter.area === a.id}">${esc(a.label)} <span class="cnt">${n}</span></button>`;
   }).join("");
-  const anything = items.length || groups.length || vehicles.length || newGroupArea;
+  const anything = items.length || groups.length || vehicles.length || lines.length || newGroupArea;
   $(".filters").hidden = !anything;
   $("#list").innerHTML = anything
     ? AREAS.filter((a) => filter.area === "all" || filter.area === a.id).map(areaSection).join("") || `<p class="empty">Nothing matches that search.</p>`
@@ -393,6 +455,26 @@ document.addEventListener("click", async (e) => {
     return input?.select();
   }
   if (t("[data-price-cancel]")) { pricing = null; return renderHome(); }
+  if ((b = t("[data-month]"))) { budgetMonth = addMonths(budgetMonth, Number(b.dataset.month)); budgetEdit = null; return renderHome(); }
+  if ((b = t("[data-month-copy]"))) {
+    const copy = monthLines(b.dataset.monthCopy).map((l, n) => ({ ...l, id: uid(), month: budgetMonth, position: Date.now() + n }));
+    lines.push(...copy);
+    renderHome();
+    try { await store.addLines(copy); toast(`Copied ${copy.length} lines into ${monthLabel(budgetMonth)}`); } catch (err) { fail(err); await reload(); }
+    return;
+  }
+  if ((b = t("[data-line]"))) { budgetEdit = b.dataset.line; renderHome(); return focusLineForm(); }
+  if ((b = t("[data-line-new]"))) { budgetEdit = `new-${b.dataset.lineNew}`; renderHome(); return focusLineForm(); }
+  if (t("[data-line-cancel]")) { budgetEdit = null; return renderHome(); }
+  if ((b = t("[data-line-delete]"))) {
+    const id = b.dataset.lineDelete;
+    const gone = lines.find((l) => l.id === id);
+    lines = lines.filter((l) => l.id !== id);
+    budgetEdit = null;
+    renderHome();
+    try { await store.deleteLine(id); toast(`Deleted ${gone.name}`); } catch (err) { fail(err); await reload(); }
+    return;
+  }
   if ((b = t("[data-group-toggle]"))) { toggle(openGroups, b.dataset.groupToggle); return renderHome(); }
   if ((b = t("[data-area-toggle]"))) { toggle(closedAreas, b.dataset.areaToggle); return renderHome(); }
   if ((b = t("[data-history]"))) {
@@ -433,6 +515,31 @@ document.addEventListener("click", async (e) => {
 });
 
 document.addEventListener("submit", async (e) => {
+  const lf = e.target.closest("[data-line-form]");
+  if (lf) {
+    e.preventDefault();
+    const name = lf.querySelector(".lname").value.trim();
+    const amount = toNum(lf.querySelector(".lamt").value);
+    if (!name || amount == null) return;
+    const id = lf.dataset.lineForm;
+    const existing = lines.find((l) => l.id === id);
+    budgetEdit = null;
+    try {
+      if (existing) {
+        Object.assign(existing, { name, amount });
+        renderHome();
+        await store.updateLine(id, { name, amount });
+      } else {
+        const l = { id: uid(), householdId: household.id, month: budgetMonth, kind: lf.dataset.kind, name, amount, position: Date.now() };
+        lines.push(l);
+        budgetEdit = `new-${l.kind}`;
+        renderHome();
+        focusLineForm();
+        await store.addLines([l]);
+      }
+    } catch (err) { fail(err); await reload(); }
+    return;
+  }
   if (e.target.id === "groupForm") {
     e.preventDefault();
     const name = $("#groupName").value.trim();
@@ -1060,7 +1167,8 @@ $("#authForm").addEventListener("submit", async (e) => {
 
 async function reload() {
   household = await store.household();
-  ({ items, groups, vehicles } = await store.load(household.id));
+  ({ items, groups, vehicles, lines } = await store.load(household.id));
+  budgetMonth ??= todayIso().slice(0, 8) + "01";
   if (!$("#home").hidden) renderHome();
   if (editing && !$("#itemSheet").hidden) { if (sheetItem()) renderDocs(); else closeItem(); }
 }

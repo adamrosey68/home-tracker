@@ -221,6 +221,31 @@ ul { list-style: none; margin: 0; padding: 0; }
 .gnew { display: flex; flex-direction: column; gap: 8px; }
 .gnew .field { max-width: 420px; }
 
+/* Monthly budget */
+.budget { max-width: 760px; }
+.bhead { display: flex; align-items: center; gap: 6px; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+.bmonth { flex: 1; text-align: center; font-family: var(--font-display); font-size: 18px; font-weight: 700; text-transform: none; letter-spacing: 0; color: var(--fg); }
+.bhead .gbtn { font-size: 26px; }
+.bempty { padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.btotals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.btotals div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.blabel { font-size: 12px; color: var(--muted); }
+.bnum { font-family: var(--font-display); font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; }
+.bnum.in { color: var(--ok); }
+.bnum.neg { color: var(--danger); }
+.bsect { padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+.bsect + .bsect { border-top: 1px solid var(--line); }
+.bsect h3 { display: flex; align-items: center; gap: 8px; }
+.bsect h3 .cnt { min-width: 22px; padding: 1px 7px; border-radius: 10px; background: var(--bg); font-size: 12px; text-align: center; color: var(--muted); }
+.llist li + li { border-top: 1px solid var(--line); }
+.lrow { width: 100%; min-height: 44px; padding: 8px 6px; border: 0; background: none; color: inherit; text-align: left; display: flex; align-items: center; gap: 10px; font-size: 15px; border-radius: 8px; }
+.lrow:hover { background: var(--bg); }
+.lrow .lname { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.lrow .lamt { font-variant-numeric: tabular-nums; font-weight: 600; }
+.lform { display: grid; grid-template-columns: 1fr 110px; gap: 8px; padding: 8px 0; }
+.lform .row { grid-column: 1 / -1; }
+.ladd { align-self: flex-start; margin-left: -8px; color: var(--accent); font-weight: 600; }
+
 /* Vehicles */
 .vehicle { display: flex; flex-direction: column; gap: 12px; }
 .vcard { max-width: 760px; }

@@ -23,6 +23,12 @@ const toVehicle = (r) => ({
   id: r.id, householdId: r.household_id, registration: r.registration, nickname: r.nickname, make: r.make, model: r.model,
   details: r.details || [], notes: r.notes, position: r.position,
 });
+const toLine = (r) => ({ id: r.id, householdId: r.household_id, month: r.month, kind: r.kind, name: r.name, amount: Number(r.amount), position: r.position });
+function lineRow(l) {
+  const r = {};
+  for (const k of ["month", "kind", "name", "amount", "position"]) if (k in l) r[k] = l[k];
+  return r;
+}
 function groupRow(g) {
   const r = {};
   for (const k of ["name", "area", "position"]) if (k in g) r[k] = g[k];
@@ -79,17 +85,21 @@ function cloud() {
     async join(code) { return ok(await sb.rpc("join_household", { code })); },
 
     async load(householdId) {
-      const [its, docs, gs, vs] = await Promise.all([
+      const [its, docs, gs, vs, ls] = await Promise.all([
         sb.from("items").select("*").eq("household_id", householdId).order("renewal_date", { nullsFirst: false }),
         sb.from("item_docs").select("id, item_id, path, name, mime, created_at").eq("household_id", householdId).order("created_at"),
         sb.from("item_groups").select("*").eq("household_id", householdId).order("position").order("created_at"),
         sb.from("vehicles").select("*").eq("household_id", householdId).order("position").order("created_at"),
+        sb.from("budget_lines").select("*").eq("household_id", householdId).order("position").order("created_at"),
       ]).then((rs) => rs.map(ok));
       const items = its.map(toItem);
       const index = new Map(items.map((i) => [i.id, i]));
       for (const d of docs) index.get(d.item_id)?.docs.push(toDoc(d));
-      return { items, groups: gs.map(toGroup), vehicles: vs.map(toVehicle) };
+      return { items, groups: gs.map(toGroup), vehicles: vs.map(toVehicle), lines: ls.map(toLine) };
     },
+    async addLines(list) { ok(await sb.from("budget_lines").insert(list.map((l) => ({ id: l.id, household_id: l.householdId, ...lineRow(l) })))); },
+    async updateLine(id, patch) { ok(await sb.from("budget_lines").update(lineRow(patch)).eq("id", id)); },
+    async deleteLine(id) { ok(await sb.from("budget_lines").delete().eq("id", id)); },
     async addGroup(g) { ok(await sb.from("item_groups").insert({ id: g.id, household_id: g.householdId, ...groupRow(g) })); },
     async updateGroup(id, patch) { ok(await sb.from("item_groups").update(groupRow(patch)).eq("id", id)); },
     async addVehicle(v) { ok(await sb.from("vehicles").insert({ id: v.id, household_id: v.householdId, ...vehicleRow(v) })); },
@@ -140,7 +150,7 @@ function cloud() {
     subscribe(onChange) {
       if (channel) return;
       channel = sb.channel("sync");
-      for (const table of ["items", "item_docs", "item_groups", "vehicles", "household_members"]) {
+      for (const table of ["items", "item_docs", "item_groups", "vehicles", "budget_lines", "household_members"]) {
         channel.on("postgres_changes", { event: "*", schema: "public", table }, onChange);
       }
       channel.subscribe();
@@ -152,8 +162,8 @@ function cloud() {
 function local() {
   const KEY = "home-tracker-demo";
   const read = () => {
-    try { return { name: "Our home", items: [], docs: [], groups: [], vehicles: [], ...JSON.parse(localStorage.getItem(KEY)) }; }
-    catch { return { name: "Our home", items: [], docs: [], groups: [], vehicles: [] }; }
+    try { return { name: "Our home", items: [], docs: [], groups: [], vehicles: [], lines: [], ...JSON.parse(localStorage.getItem(KEY)) }; }
+    catch { return { name: "Our home", items: [], docs: [], groups: [], vehicles: [], lines: [] }; }
   };
   const edit = (fn) => { const d = read(); fn(d); localStorage.setItem(KEY, JSON.stringify(d)); };
   const user = { id: "local", email: null };
@@ -175,8 +185,11 @@ function local() {
     async load() {
       const d = read();
       const items = d.items.map((it) => ({ ...it, docs: d.docs.filter((x) => x.itemId === it.id).map(({ itemId, ...x }) => x) }));
-      return { items, groups: d.groups.slice().sort((a, b) => a.position - b.position), vehicles: d.vehicles.slice() };
+      return { items, groups: d.groups.slice().sort((a, b) => a.position - b.position), vehicles: d.vehicles.slice(), lines: d.lines.slice() };
     },
+    async addLines(list) { edit((d) => d.lines.push(...list.map((l) => ({ ...l })))); },
+    async updateLine(id, patch) { edit((d) => Object.assign(d.lines.find((l) => l.id === id) || {}, patch)); },
+    async deleteLine(id) { edit((d) => { d.lines = d.lines.filter((l) => l.id !== id); }); },
     async addVehicle(v) { edit((d) => d.vehicles.push({ ...v })); },
     async updateVehicle(id, patch) { edit((d) => Object.assign(d.vehicles.find((v) => v.id === id) || {}, patch)); },
     async deleteVehicle(id) {
