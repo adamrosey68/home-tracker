@@ -186,6 +186,16 @@ ul { list-style: none; margin: 0; padding: 0; }
 .ahead h2 { flex: 1; min-width: 0; font-size: 20px; }
 .ahead .pmeta { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .ahead .btn { margin-right: -10px; color: var(--accent); font-weight: 600; }
+.atoggle { flex: 1; min-width: 0; min-height: 44px; padding: 0; border: 0; background: none; color: inherit; text-align: left; display: flex; align-items: center; gap: 10px; }
+.atoggle .caret, .gtoggle .caret { width: 14px; flex: none; font-size: 13px; color: var(--muted); }
+.atoggle h2 { flex: 0 1 auto; }
+.atoggle .cnt { min-width: 22px; padding: 1px 7px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); font-size: 12px; color: var(--muted); text-align: center; font-variant-numeric: tabular-nums; }
+.gtoggle { flex: 1; min-width: 0; align-self: stretch; margin: -10px 0 -10px -14px; padding: 10px 0 10px 12px; border: 0; background: none; color: inherit; text-align: left; display: flex; align-items: center; gap: 8px; }
+.gtitle { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.gtitle .pname { flex: none; }
+.gsum { font-size: 13px; color: var(--ok); font-weight: 600; overflow-wrap: anywhere; }
+.gcard.shut .phdr { border-bottom: 0; }
+.gcard.shut .phdr .badge { flex: none; }
 .glist { display: flex; flex-direction: column; gap: 12px; }
 .gbtn { width: 40px; height: 40px; flex: 0 0 40px; border: 0; background: none; color: var(--muted); font-size: 20px; line-height: 1; border-radius: 10px; }
 .gedit { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--bg); }

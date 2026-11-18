@@ -29,6 +29,12 @@ let editingVehicle = null;
 let vehicleDeleteArmed = false;
 const openVehicleDetails = new Set();
 const openHistory = new Set();
+const UI_KEY = "home-tracker-ui";
+const ui = (() => { try { return JSON.parse(localStorage.getItem(UI_KEY)) || {}; } catch { return {}; } })();
+const openGroups = new Set(ui.openGroups || []);
+const closedAreas = new Set(ui.closedAreas || []);
+const saveUi = () => localStorage.setItem(UI_KEY, JSON.stringify({ openGroups: [...openGroups], closedAreas: [...closedAreas] }));
+const toggle = (set, id) => { if (set.has(id)) set.delete(id); else set.add(id); saveUi(); };
 let importRows = null, importMap = {};
 
 /* ---------- Dates and money ---------- */
@@ -201,10 +207,22 @@ function groupCard(g) {
   const open = openHistory.has(g.id) || (q() && past.some(textMatch));
   const renaming = editingGroup === g.id;
   const pricingNow = now && pricing === now.id;
-  return `<section class="pcard gcard">
-    <div class="phdr"><span class="pname">${esc(g.name)}</span>
-      <span class="pmeta">${now?.cost != null ? esc(costLabel(now)) : ""}</span>
+  const expanded = openGroups.has(g.id) || renaming || pricingNow || !!q();
+  const summary = now ? [now.provider || "Provider not set", now.cost != null && costLabel(now)].filter(Boolean).join(" · ") : "No current provider";
+  return `<section class="pcard gcard${expanded ? "" : " shut"}">
+    <div class="phdr">
+      <button class="gtoggle" type="button" data-group-toggle="${g.id}" aria-expanded="${expanded}">
+        <span class="caret">${expanded ? "▾" : "▸"}</span>
+        <span class="gtitle"><span class="pname">${esc(g.name)}</span>${expanded ? "" : `<span class="gsum">${esc(summary)}</span>`}</span>
+      </button>
+      ${!expanded && now ? dateBadge(now) : ""}
+      ${expanded ? `<span class="pmeta">${now?.cost != null ? esc(costLabel(now)) : ""}</span>` : ""}
       <button class="gbtn" type="button" data-group-menu="${g.id}" aria-label="Rename or delete ${esc(g.name)}">⋯</button></div>
+    ${expanded ? groupInner(g, all, current, past, now, open, renaming, pricingNow) : ""}
+  </section>`;
+}
+function groupInner(g, all, current, past, now, open, renaming, pricingNow) {
+  return `
     ${renaming ? `<form class="gedit" data-group-rename="${g.id}">
       <label class="sr" for="gname-${g.id}">Group name</label>
       <input type="text" id="gname-${g.id}" value="${esc(g.name)}" maxlength="60">
@@ -234,8 +252,7 @@ function groupCard(g) {
     ${past.length ? `<div class="ghist">
       <button class="hfold" type="button" data-history="${g.id}" aria-expanded="${open}"><span class="caret">${open ? "▾" : "▸"}</span> History <span class="cnt">${past.length}</span></button>
       ${open ? `<ul class="hlist">${past.map(pastRow).join("")}</ul>` : ""}
-    </div>` : ""}
-  </section>`;
+    </div>` : ""}`;
 }
 
 /* ---------- Vehicles ---------- */
@@ -291,10 +308,21 @@ function areaSection(a) {
   const loose = items.filter((i) => !i.groupId && !i.archivedAt && areaIdOf(i) === a.id && (!q() || textMatch(i))).sort(sortItems);
   const adding = newGroupArea === a.id;
   if (q() && !gs.length && !loose.length && !vBlocks) return "";
+  const shut = closedAreas.has(a.id) && !q() && !adding;
+  const n = all.length + vs.length + (loose.length ? 1 : 0);
   return `<section class="area">
-    <div class="ahead"><span class="aicon ${a.id}">${svg(a.icon)}</span><h2>${esc(a.label)}</h2>
+    <div class="ahead">
+      <button class="atoggle" type="button" data-area-toggle="${a.id}" aria-expanded="${!shut}">
+        <span class="aicon ${a.id}">${svg(a.icon)}</span><h2>${esc(a.label)}</h2>
+        ${shut && n ? `<span class="cnt">${n}</span>` : ""}<span class="caret">${shut ? "▸" : "▾"}</span>
+      </button>
       ${a.id === "car" ? `<button class="btn quiet" type="button" data-vehicle-new>+ Vehicle</button>` : ""}
       <button class="btn quiet" type="button" data-new-group="${a.id}">+ Group</button></div>
+    ${shut ? "" : areaBody(a, adding, vBlocks, gs, loose)}
+  </section>`;
+}
+function areaBody(a, adding, vBlocks, gs, loose) {
+  return `
     ${adding ? `<form class="gnew" id="groupForm">
       <div class="inline-form">
         <label class="sr" for="groupName">Group name</label>
@@ -312,8 +340,7 @@ function areaSection(a) {
           <button class="btn quiet addin" type="button" data-add="${a.id}">+ Add</button></div>
         <ul class="irows">${loose.map(itemRow).join("")}</ul></section>` : ""}
       ${!gs.length && !loose.length && !adding && !vBlocks ? `<p class="empty">No groups yet. Tap “+ Group” to start one.</p>` : ""}
-    </div>
-  </section>`;
+    </div>`;
 }
 
 function renderHome() {
@@ -366,6 +393,8 @@ document.addEventListener("click", async (e) => {
     return input?.select();
   }
   if (t("[data-price-cancel]")) { pricing = null; return renderHome(); }
+  if ((b = t("[data-group-toggle]"))) { toggle(openGroups, b.dataset.groupToggle); return renderHome(); }
+  if ((b = t("[data-area-toggle]"))) { toggle(closedAreas, b.dataset.areaToggle); return renderHome(); }
   if ((b = t("[data-history]"))) {
     const id = b.dataset.history;
     if (openHistory.has(id)) openHistory.delete(id); else openHistory.add(id);
@@ -410,6 +439,8 @@ document.addEventListener("submit", async (e) => {
     if (!name) return;
     const g = { id: uid(), householdId: household.id, area: newGroupArea, name, position: Date.now(), vehicleId: $("#groupVehicle")?.value || null };
     groups.push(g);
+    openGroups.add(g.id);
+    saveUi();
     newGroupArea = null;
     renderHome();
     try {
@@ -713,6 +744,8 @@ $("#renewForm").addEventListener("submit", async (e) => {
       await store.addItem(next);
       closeItem();
       openHistory.add(it.groupId);
+      openGroups.add(it.groupId);
+      saveUi();
       renderHome();
       toast(`${provider || "New provider"} is now current, until ${prettyDate(renewalDate)}`, { label: "Add documents", run: () => openItem(next.id) });
       return;
