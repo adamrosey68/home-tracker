@@ -6,3 +6,4 @@ dist
 .wrangler
 supabase/.temp
 supabase/.env
+supabase/secrets.env
