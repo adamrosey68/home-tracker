@@ -339,7 +339,11 @@ function budgetCard() {
   return `<section class="pcard budget">
     <div class="bhead">
       <button class="gbtn" type="button" data-month="-1" aria-label="Previous month">‹</button>
-      <h3 class="bmonth">${esc(monthLabel(m))}</h3>
+      <label class="sr" for="budgetPick">Month</label>
+      <select id="budgetPick" class="bmonth" data-month-pick>
+        ${[...new Set([...lines.map((l) => l.month), m])].sort().reverse()
+          .map((x) => `<option value="${x}"${x === m ? " selected" : ""}>${esc(monthLabel(x))}</option>`).join("")}
+      </select>
       <button class="gbtn" type="button" data-month="1" aria-label="Next month">›</button>
     </div>
     ${empty ? `<div class="bempty"><p class="empty">Nothing for ${esc(monthLabel(m))} yet.</p>
@@ -431,6 +435,12 @@ function renderHome() {
 }
 
 $("#search").addEventListener("input", (e) => { filter.q = e.target.value; renderHome(); });
+$("#list").addEventListener("change", (e) => {
+  if (!e.target.matches("[data-month-pick]")) return;
+  budgetMonth = e.target.value;
+  budgetEdit = null;
+  renderHome();
+});
 $("#areaChips").addEventListener("click", (e) => {
   const b = e.target.closest("[data-area]");
   if (b) { filter.area = b.dataset.area; renderHome(); }
