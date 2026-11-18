@@ -126,7 +126,7 @@ Deno.serve(async (req) => {
       const remindDue = p.remind_on ? toDay(p.remind_on) <= today : days <= 14;
       const stage = stageFor(days, remindDue, p.reminded);
       if (!stage || !(await claim("cruise_payments", p.id, p.reminded, stage))) continue;
-      const name = p.cruises?.name ?? "Cruise";
+      const name = p.cruises?.name ?? "Holiday";
       sent += await sendTo(await subsFor(p.household_id, "cruise"), {
         title: days < 0 ? `${name}: ${p.label} was due ${when(days)}` : `${name}: ${p.label} due ${when(days)}`,
         body: `£${Number(p.amount).toFixed(2)} · ${prettyDate(p.due_date)}\nTap to mark it paid.`,
@@ -145,7 +145,7 @@ Deno.serve(async (req) => {
       const days = toDay(t.due_date) - today;
       if (days > 0 || days < -7 || !(await claim("cruise_tasks", t.id, null, "final"))) continue;
       sent += await sendTo(await subsFor(t.household_id, "cruise"), {
-        title: `${t.cruises?.name ?? "Cruise"}: ${t.text}`,
+        title: `${t.cruises?.name ?? "Holiday"}: ${t.text}`,
         body: `On your checklist, due ${when(days)}.\nTap to tick it off.`,
         tag: `${t.id}-task`, url: `/?cruise=${t.cruise_id}`,
       });
