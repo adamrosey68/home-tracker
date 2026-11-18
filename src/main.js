@@ -1,7 +1,7 @@
 import "./style.css";
 import { store } from "./store.js";
 import * as push from "./push.js";
-import { AREAS, CATEGORIES, FREQUENCIES, category, areaOf, perYear } from "./categories.js";
+import { AREAS, CATEGORIES, FREQUENCIES, category, areaOf, perYear, guessCategory } from "./categories.js";
 import { FIELDS, parseTable, guessMapping, rowsToItems, toCsv } from "./csv.js";
 
 const $ = (s) => document.querySelector(s);
@@ -13,10 +13,16 @@ const svg = (paths) => `<svg viewBox="0 0 24 24" aria-hidden="true">${paths}</sv
 let session = null;
 let household = null;
 let items = [];
+let groups = [];
 let filter = { area: "all", q: "" };
 let showArchive = false;
 let editing = null;
+let sheetOpts = {};
 let deleteArmed = false;
+let newGroupArea = null;
+let editingGroup = null;
+let groupDeleteArmed = false;
+const openHistory = new Set();
 let importRows = null, importMap = {};
 
 /* ---------- Dates and money ---------- */
@@ -33,12 +39,25 @@ function addMonths(iso, n) {
   const last = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
   return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(Math.min(d, last))}`;
 }
+const addDays = (iso, n) => new Date((dayNum(iso) + n) * 86400000).toISOString().slice(0, 10);
 const gbp = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const gbp0 = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
 const money = (n) => (Number.isInteger(n) ? gbp0 : gbp).format(n);
 const PER = { monthly: "/month", quarterly: "/quarter", yearly: "/year", "one-off": "" };
 const costLabel = (it) => (it.cost == null ? "" : money(it.cost) + PER[it.frequency]);
 const yearly = (it) => (it.archivedAt || it.cost == null ? 0 : it.cost * perYear(it.frequency));
+const toNum = (s) => (s.trim() === "" ? null : Math.round(parseFloat(s) * 100) / 100);
+
+/* ---------- Groups ---------- */
+
+const groupById = (id) => groups.find((g) => g.id === id);
+const groupOf = (i) => (i.groupId ? groupById(i.groupId) : null);
+const areaIdOf = (i) => groupOf(i)?.area || areaOf(i.category).id;
+const areaById = (id) => AREAS.find((a) => a.id === id);
+const nameOf = (i) => groupOf(i)?.name || i.title;
+const isPast = (i) => !!(i.groupId && i.archivedAt);
+const groupItems = (g) => items.filter((i) => i.groupId === g.id);
+const byNewest = (a, b) => (b.renewalDate || b.startDate || "").localeCompare(a.renewalDate || a.startDate || "");
 
 function when(days) {
   if (days < -1) return `${-days} days overdue`;
@@ -48,10 +67,14 @@ function when(days) {
   if (days < 60) return `In ${days} days`;
   return null;
 }
+const reminderReached = (it) => (it.remindOn ? daysUntil(it.remindOn) <= 0 : !!it.renewalDate && daysUntil(it.renewalDate) <= it.remindDays);
 function dateBadge(it) {
-  if (!it.renewalDate) return '<span class="badge plain">No date</span>';
+  if (!it.renewalDate) {
+    if (!it.remindOn) return '<span class="badge plain">No date</span>';
+    return `<span class="badge ${reminderReached(it) ? "today" : "plain"}">Reminder ${esc(prettyDate(it.remindOn, false))}</span>`;
+  }
   const days = daysUntil(it.renewalDate);
-  const cls = days < 0 ? "late" : days <= 7 ? "today" : days <= it.remindDays ? "" : "plain";
+  const cls = days < 0 ? "late" : days <= 7 ? "today" : reminderReached(it) ? "" : "plain";
   return `<span class="badge ${cls}" title="${esc(prettyDate(it.renewalDate))}">${esc(cls === "plain" ? prettyDate(it.renewalDate) : when(days) || prettyDate(it.renewalDate))}</span>`;
 }
 const dateLabel = (cat) => ({ mot: "MOT due", tax: "Tax due", service: "Service due", mortgage: "Deal ends", carfinance: "Agreement ends" })[cat]
@@ -87,18 +110,18 @@ function fail(e) {
 
 function renderTotals() {
   const live = items.filter((i) => !i.archivedAt);
-  if (!live.length) {
+  if (!live.length && !groups.length) {
     $("#totals").innerHTML = `
       <div class="welcome">
         <h2>Let's get everything in one place</h2>
-        <p class="sub">Add your insurance, bills, MOT and car tax, or bring them in from your Google Sheet.</p>
-        <div class="row"><button class="btn primary" type="button" data-add="">+ Add the first one</button>
+        <p class="sub">Start a group for each thing you pay for, like “Buildings and contents” or “Gas and electricity”, then add who you're with now and who you've used before.</p>
+        <div class="row"><button class="btn primary" type="button" data-new-group="home">+ Start a group</button>
         <button class="btn" type="button" data-nav="import">Import from Google Sheets</button></div>
       </div>`;
     return;
   }
   const total = live.reduce((s, i) => s + yearly(i), 0);
-  const byArea = AREAS.map((a) => ({ ...a, sum: live.filter((i) => areaOf(i.category).id === a.id).reduce((s, i) => s + yearly(i), 0) }))
+  const byArea = AREAS.map((a) => ({ ...a, sum: live.filter((i) => areaIdOf(i) === a.id).reduce((s, i) => s + yearly(i), 0) }))
     .filter((a) => a.sum > 0);
   const missing = live.filter((i) => i.cost == null).length;
   $("#totals").innerHTML = `
@@ -107,59 +130,129 @@ function renderTotals() {
     <p class="sub">About ${gbp0.format(total / 12)} a month${missing ? ` · ${missing} without a price` : ""}</p>
     <div class="bars">${byArea.map((a) => `
       <div class="bar"><span class="aicon sm ${a.id}">${svg(a.icon)}</span><span class="blabel">${esc(a.label)}</span>
-        <span class="btrack"><i class="${a.id}" style="width:${Math.max(3, (a.sum / total) * 100).toFixed(1)}%"></i></span>
+        <span class="btrack"><i class="${a.id}" style="width:${Math.max(3, (a.sum / (total || 1)) * 100).toFixed(1)}%"></i></span>
         <span class="bval">${gbp0.format(a.sum)}</span></div>`).join("")}
     </div>`;
 }
 
 function renderComing() {
-  const dated = items.filter((i) => !i.archivedAt && i.renewalDate).sort((a, b) => a.renewalDate.localeCompare(b.renewalDate));
-  const soon = dated.filter((i) => daysUntil(i.renewalDate) <= Math.max(60, i.remindDays));
-  const next = dated.find((i) => daysUntil(i.renewalDate) >= 0);
-  if (!items.some((i) => !i.archivedAt)) { $("#coming").hidden = true; return; }
+  const live = items.filter((i) => !i.archivedAt);
+  if (!live.length) { $("#coming").hidden = true; return; }
   $("#coming").hidden = false;
-  const late = soon.filter((i) => daysUntil(i.renewalDate) < 0).length;
+  const key = (i) => i.renewalDate || i.remindOn;
+  const dated = live.filter(key).sort((a, b) => key(a).localeCompare(key(b)));
+  const soon = dated.filter((i) => (i.renewalDate && daysUntil(i.renewalDate) <= 60) || (i.remindOn && daysUntil(i.remindOn) <= 0));
+  const next = dated.find((i) => !soon.includes(i));
+  const late = soon.filter((i) => i.renewalDate && daysUntil(i.renewalDate) < 0).length;
   $("#coming").innerHTML = `
     <div class="dhead"><h3>Coming up</h3>${late ? `<span class="badge late">${late} overdue</span>` : ""}</div>
     ${soon.length ? `<ul class="clist">${soon.map((i) => `
       <li><button type="button" data-open="${i.id}">
-        <span class="aicon sm ${areaOf(i.category).id}">${svg(areaOf(i.category).icon)}</span>
-        <span class="cbody"><span class="ctitle">${esc(i.title)}</span><span class="csub">${esc([i.provider, prettyDate(i.renewalDate, false)].filter(Boolean).join(" · "))}</span></span>
+        <span class="aicon sm ${areaIdOf(i)}">${svg(areaById(areaIdOf(i)).icon)}</span>
+        <span class="cbody"><span class="ctitle">${esc(nameOf(i))}</span><span class="csub">${esc([i.provider, i.renewalDate && prettyDate(i.renewalDate, false)].filter(Boolean).join(" · "))}</span></span>
         ${dateBadge(i)}
       </button></li>`).join("")}</ul>`
-    : `<p class="empty">Nothing due in the next 60 days.${next ? ` Next up: ${esc(next.title)} on ${esc(prettyDate(next.renewalDate))}.` : ""}</p>`}`;
+    : `<p class="empty">Nothing due in the next 60 days.${next ? ` Next up: ${esc(nameOf(next))} on ${esc(prettyDate(key(next)))}.` : ""}</p>`}`;
 }
 
+const DOC_ICON = svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path><path d="M14 3v5h5"></path>');
 function itemRow(i) {
   const sub = [i.provider, i.covers].filter(Boolean).join(" · ");
   return `<li><button type="button" class="irow" data-open="${i.id}">
     <span class="ibody"><span class="ititle">${esc(i.title)}</span>${sub ? `<span class="isub">${esc(sub)}</span>` : ""}</span>
     <span class="iright">${dateBadge(i)}${i.cost != null ? `<span class="icost">${esc(costLabel(i))}</span>` : ""}</span>
-    ${i.docs.length ? `<span class="idocs" title="${i.docs.length} document${i.docs.length === 1 ? "" : "s"}">${svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"></path><path d="M14 3v5h5"></path>')}</span>` : ""}
+    ${i.docs.length ? `<span class="idocs" title="${i.docs.length} document${i.docs.length === 1 ? "" : "s"}">${DOC_ICON}</span>` : ""}
   </button></li>`;
 }
 const sortItems = (a, b) => (a.renewalDate || "9999").localeCompare(b.renewalDate || "9999") || a.title.localeCompare(b.title);
 
-function matches(i) {
-  if (filter.area !== "all" && areaOf(i.category).id !== filter.area) return false;
-  const q = filter.q.trim().toLowerCase();
-  if (!q) return true;
-  return [i.title, i.provider, i.covers, i.reference, i.notes, category(i.category).label].some((v) => v && v.toLowerCase().includes(q));
+const q = () => filter.q.trim().toLowerCase();
+const textMatch = (i) => [nameOf(i), i.provider, i.covers, i.reference, i.notes, category(i.category).label]
+  .some((v) => v && v.toLowerCase().includes(q()));
+const groupMatches = (g) => !q() || g.name.toLowerCase().includes(q()) || groupItems(g).some(textMatch);
+
+function currentRow(i) {
+  const bits = [
+    i.startDate && `From ${prettyDate(i.startDate)}`,
+    i.renewalDate && `Expires ${prettyDate(i.renewalDate)}`,
+    i.remindOn && `Reminder ${prettyDate(i.remindOn)}`,
+  ].filter(Boolean);
+  return `<button type="button" class="gcur" data-open="${i.id}">
+    <span class="ibody"><span class="gprov">${esc(i.provider || "Provider not set")}</span>
+      ${bits.length ? `<span class="isub">${esc(bits.join(" · "))}</span>` : ""}
+      ${i.reference ? `<span class="isub">Policy ${esc(i.reference)}</span>` : ""}</span>
+    <span class="iright">${dateBadge(i)}${i.cost != null ? `<span class="icost">${esc(costLabel(i))}</span>` : ""}</span>
+    ${i.docs.length ? `<span class="idocs">${DOC_ICON}</span>` : ""}
+  </button>`;
+}
+function pastRow(i) {
+  const span = [i.startDate && prettyDate(i.startDate), i.renewalDate && prettyDate(i.renewalDate)].filter(Boolean).join(" – ");
+  return `<li><button type="button" class="hrow" data-open="${i.id}">
+    <span class="hprov">${esc(i.provider || "Unknown")}</span>
+    <span class="hdate">${esc(span || "No dates")}</span>
+    <span class="hcost">${i.cost != null ? esc(costLabel(i)) : ""}</span>
+  </button></li>`;
 }
 
-function areaCards(list, emptyText) {
-  const cards = AREAS.map((a) => {
-    const its = list.filter((i) => areaOf(i.category).id === a.id).sort(sortItems);
-    if (!its.length) return "";
-    const sum = its.reduce((s, i) => s + yearly(i), 0);
-    return `<section class="pcard">
-      <div class="phdr"><span class="aicon ${a.id}">${svg(a.icon)}</span><span class="pname">${esc(a.label)}</span>
-        <span class="pmeta">${sum ? `${gbp0.format(sum)} a year` : ""}</span>
-        <button class="btn quiet addin" type="button" data-add="${a.id}" aria-label="Add to ${esc(a.label)}">+ Add</button></div>
-      <ul class="irows">${its.map(itemRow).join("")}</ul>
-    </section>`;
-  }).join("");
-  return cards || `<p class="empty">${esc(emptyText)}</p>`;
+function groupCard(g) {
+  const all = groupItems(g);
+  const current = all.filter((i) => !i.archivedAt).sort(sortItems);
+  const past = all.filter((i) => i.archivedAt).sort(byNewest);
+  const sum = current.reduce((s, i) => s + yearly(i), 0);
+  const open = openHistory.has(g.id) || (q() && past.some(textMatch));
+  const renaming = editingGroup === g.id;
+  return `<section class="pcard gcard">
+    <div class="phdr"><span class="pname">${esc(g.name)}</span>
+      <span class="pmeta">${sum ? `${gbp0.format(sum)} a year` : ""}</span>
+      <button class="gbtn" type="button" data-group-menu="${g.id}" aria-label="Rename or delete ${esc(g.name)}">⋯</button></div>
+    ${renaming ? `<form class="gedit" data-group-rename="${g.id}">
+      <label class="sr" for="gname-${g.id}">Group name</label>
+      <input type="text" id="gname-${g.id}" value="${esc(g.name)}" maxlength="60">
+      <div class="row"><button class="btn primary" type="submit">Save</button>
+        <button class="btn danger${groupDeleteArmed ? " confirm" : ""}" type="button" data-group-delete="${g.id}">${groupDeleteArmed ? `Tap again to delete it and its ${all.length} entr${all.length === 1 ? "y" : "ies"}` : "Delete group"}</button>
+        <button class="btn quiet" type="button" data-group-cancel>Cancel</button></div>
+    </form>` : ""}
+    <div class="gbody">
+      <h3>Current</h3>
+      ${current.length ? current.map(currentRow).join("") : `<p class="empty">No current provider yet.</p>`}
+      <div class="row">
+        ${current.length ? `<button class="btn" type="button" data-renew="${current[0].id}">Renew or switch</button>`
+          : `<button class="btn primary" type="button" data-add-entry="${g.id}">+ Current provider</button>`}
+        <button class="btn quiet" type="button" data-add-past="${g.id}">+ Past provider</button>
+      </div>
+    </div>
+    ${past.length ? `<div class="ghist">
+      <button class="hfold" type="button" data-history="${g.id}" aria-expanded="${open}"><span class="caret">${open ? "▾" : "▸"}</span> History <span class="cnt">${past.length}</span></button>
+      ${open ? `<ul class="hlist">${past.map(pastRow).join("")}</ul>` : ""}
+    </div>` : ""}
+  </section>`;
+}
+
+function areaSection(a) {
+  const gs = groups.filter((g) => g.area === a.id && groupMatches(g));
+  const loose = items.filter((i) => !i.groupId && !i.archivedAt && areaIdOf(i) === a.id && (!q() || textMatch(i))).sort(sortItems);
+  const adding = newGroupArea === a.id;
+  if (q() && !gs.length && !loose.length) return "";
+  const sum = items.filter((i) => !i.archivedAt && areaIdOf(i) === a.id).reduce((s, i) => s + yearly(i), 0);
+  return `<section class="area">
+    <div class="ahead"><span class="aicon ${a.id}">${svg(a.icon)}</span><h2>${esc(a.label)}</h2>
+      <span class="pmeta">${sum ? `${gbp0.format(sum)} a year` : ""}</span>
+      <button class="btn quiet" type="button" data-new-group="${a.id}">+ Group</button></div>
+    ${adding ? `<form class="inline-form" id="groupForm">
+      <label class="sr" for="groupName">Group name</label>
+      <input type="text" id="groupName" maxlength="60" placeholder="e.g. Buildings and contents" autocomplete="off">
+      <button class="btn primary" type="submit">Create</button>
+      <button class="btn quiet" type="button" data-group-cancel>Cancel</button>
+    </form>` : ""}
+    <div class="glist">
+      ${gs.map(groupCard).join("")}
+      ${loose.length ? `<section class="pcard">
+        <div class="phdr"><span class="pname">${gs.length ? "Not in a group" : "Items"}</span>
+          <button class="btn quiet addin" type="button" data-add="${a.id}">+ Add</button></div>
+        <ul class="irows">${loose.map(itemRow).join("")}</ul></section>` : ""}
+      ${!gs.length && !loose.length && !adding ? `<p class="empty">No groups yet. Tap “+ Group” to start one.</p>` : ""}
+    </div>
+  </section>`;
 }
 
 function renderHome() {
@@ -167,18 +260,23 @@ function renderHome() {
   document.title = household?.name || "Home Tracker";
   renderTotals();
   renderComing();
-  const live = items.filter((i) => !i.archivedAt);
+  const count = (id) => groups.filter((g) => g.area === id).length + items.filter((i) => !i.groupId && !i.archivedAt && areaIdOf(i) === id).length;
   $("#areaChips").innerHTML = [{ id: "all", label: "All" }, ...AREAS].map((a) => {
-    const n = a.id === "all" ? live.length : live.filter((i) => areaOf(i.category).id === a.id).length;
+    const n = a.id === "all" ? AREAS.reduce((s, x) => s + count(x.id), 0) : count(a.id);
     return `<button type="button" class="chip" data-area="${a.id}" aria-pressed="${filter.area === a.id}">${esc(a.label)} <span class="cnt">${n}</span></button>`;
   }).join("");
-  $(".filters").hidden = !live.length;
-  $("#list").innerHTML = live.length ? areaCards(live.filter(matches), "Nothing matches that search.") : "";
-  const arch = items.filter((i) => i.archivedAt);
+  const anything = items.length || groups.length || newGroupArea;
+  $(".filters").hidden = !anything;
+  $("#list").innerHTML = anything
+    ? AREAS.filter((a) => filter.area === "all" || filter.area === a.id).map(areaSection).join("") || `<p class="empty">Nothing matches that search.</p>`
+    : "";
+  const arch = items.filter((i) => i.archivedAt && !i.groupId);
   $("#archiveWrap").hidden = !arch.length;
   $("#toggleArchive").textContent = `${showArchive ? "Hide" : "Show"} archived (${arch.length})`;
   $("#archiveList").hidden = !showArchive;
-  if (showArchive) $("#archiveList").innerHTML = areaCards(arch.filter(matches), "Nothing archived matches that search.");
+  if (showArchive) $("#archiveList").innerHTML = `<section class="pcard"><ul class="irows">${arch.sort(sortItems).map(itemRow).join("")}</ul></section>`;
+  const input = $("#groupName");
+  if (input && document.activeElement !== input) input.focus();
 }
 
 $("#search").addEventListener("input", (e) => { filter.q = e.target.value; renderHome(); });
@@ -187,55 +285,134 @@ $("#areaChips").addEventListener("click", (e) => {
   if (b) { filter.area = b.dataset.area; renderHome(); }
 });
 $("#toggleArchive").onclick = () => { showArchive = !showArchive; renderHome(); };
-$("#addItem").onclick = () => openItem(null);
-document.addEventListener("click", (e) => {
-  const open = e.target.closest("[data-open]");
-  if (open) return openItem(open.dataset.open);
-  const add = e.target.closest("[data-add]");
-  if (add) openItem(null, add.dataset.add);
-});
+$("#addItem").onclick = () => openItem(null, { area: filter.area === "all" ? "home" : filter.area });
 $("#openSettings").onclick = () => show("settings");
+
+document.addEventListener("click", async (e) => {
+  const t = (sel) => e.target.closest(sel);
+  let b;
+  if ((b = t("[data-open]"))) return openItem(b.dataset.open);
+  if ((b = t("[data-add]"))) return openItem(null, { area: b.dataset.add || "home" });
+  if ((b = t("[data-add-entry]"))) return openItem(null, { groupId: b.dataset.addEntry });
+  if ((b = t("[data-add-past]"))) return openItem(null, { groupId: b.dataset.addPast, past: true });
+  if ((b = t("[data-renew]"))) { openItem(b.dataset.renew); return $("#renewOpen").click(); }
+  if ((b = t("[data-history]"))) {
+    const id = b.dataset.history;
+    if (openHistory.has(id)) openHistory.delete(id); else openHistory.add(id);
+    return renderHome();
+  }
+  if ((b = t("[data-new-group]"))) {
+    newGroupArea = b.dataset.newGroup;
+    filter.area = filter.area === "all" || filter.area === newGroupArea ? filter.area : newGroupArea;
+    renderHome();
+    return $("#groupForm")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  if ((b = t("[data-group-menu]"))) {
+    editingGroup = editingGroup === b.dataset.groupMenu ? null : b.dataset.groupMenu;
+    groupDeleteArmed = false;
+    return renderHome();
+  }
+  if (t("[data-group-cancel]")) { newGroupArea = null; editingGroup = null; groupDeleteArmed = false; return renderHome(); }
+  if ((b = t("[data-group-delete]"))) {
+    if (!groupDeleteArmed) { groupDeleteArmed = true; return renderHome(); }
+    const g = groupById(b.dataset.groupDelete);
+    groups = groups.filter((x) => x.id !== g.id);
+    items = items.filter((i) => i.groupId !== g.id);
+    editingGroup = null;
+    groupDeleteArmed = false;
+    renderHome();
+    try { await store.deleteGroup(g.id); toast(`Deleted ${g.name}`); } catch (err) { fail(err); await reload(); }
+  }
+});
+
+document.addEventListener("submit", async (e) => {
+  if (e.target.id === "groupForm") {
+    e.preventDefault();
+    const name = $("#groupName").value.trim();
+    if (!name) return;
+    const g = { id: uid(), householdId: household.id, area: newGroupArea, name, position: Date.now() };
+    groups.push(g);
+    newGroupArea = null;
+    renderHome();
+    try {
+      await store.addGroup(g);
+      toast(`Created ${name}`, { label: "Add current provider", run: () => openItem(null, { groupId: g.id }) });
+    } catch (err) { fail(err); await reload(); }
+  }
+  const rename = e.target.closest("[data-group-rename]");
+  if (rename) {
+    e.preventDefault();
+    const g = groupById(rename.dataset.groupRename);
+    const name = rename.querySelector("input").value.trim();
+    if (!name) return;
+    g.name = name;
+    editingGroup = null;
+    renderHome();
+    try { await store.updateGroup(g.id, { name }); } catch (err) { fail(err); await reload(); }
+  }
+});
 
 /* ---------- Item sheet ---------- */
 
 $("#fCategory").innerHTML = AREAS.map((a) => `<optgroup label="${esc(a.label)}">${CATEGORIES.filter((c) => c.area === a.id)
   .map((c) => `<option value="${c.id}">${esc(c.label)}</option>`).join("")}</optgroup>`).join("");
 $("#fFreq").innerHTML = FREQUENCIES.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
-$("#fRemind").innerHTML = [7, 14, 21, 30, 45, 60, 90].map((d) => `<option value="${d}">${d} days before</option>`).join("");
 
 const sheetItem = () => items.find((i) => i.id === editing);
+const sheetGroup = () => (editing ? groupOf(sheetItem()) : groupById(sheetOpts.groupId));
 
-function openItem(id, area) {
+function categoryForGroup(g) {
+  const guess = guessCategory(g.name);
+  return category(guess).area === g.area ? guess : CATEGORIES.find((c) => c.area === g.area).id;
+}
+
+function openItem(id, opts = {}) {
   editing = id;
+  sheetOpts = opts;
   deleteArmed = false;
   const it = id ? sheetItem() : null;
   if (id && !it) return;
-  const cat = it ? it.category : (CATEGORIES.find((c) => c.area === area) || CATEGORIES.find((c) => c.id === "carins")).id;
-  $("#sheetTitle").textContent = it ? it.title : "Add";
-  $("#sheetSub").textContent = it ? category(it.category).label : "Insurance, a bill, MOT, tax or anything that renews";
+  const g = sheetGroup();
+  const past = it ? isPast(it) : !!opts.past;
+  const cat = it ? it.category : g ? categoryForGroup(g) : (CATEGORIES.find((c) => c.area === opts.area) || CATEGORIES[0]).id;
+
+  $("#sheetTitle").textContent = g ? g.name : it ? it.title : "Add";
+  $("#sheetSub").textContent = g
+    ? (it ? (past ? "Past provider" : "Current provider") : (past ? "Add a past provider" : "Add the current provider"))
+    : it ? category(it.category).label : "Insurance, a bill, MOT, tax or anything that renews";
+  $("#typeField").hidden = !!g;
+  $("#titleField").hidden = !!g;
+  $("#remindField").hidden = past;
+  $("#fAuto").closest(".tick").hidden = past;
   $("#fCategory").value = cat;
   $("#fTitle").value = it ? it.title : category(cat).label;
   $("#fTitle").dataset.auto = it ? "" : "1";
   $("#fProvider").value = it?.provider || "";
   $("#fCovers").value = it?.covers || "";
+  $("#fStart").value = it?.startDate || "";
   $("#fReference").value = it?.reference || "";
   $("#fCost").value = it?.cost ?? "";
   $("#fFreq").value = it ? it.frequency : category(cat).freq;
   $("#fDate").value = it?.renewalDate || "";
-  $("#fRemind").value = String(it?.remindDays ?? 30);
+  $("#fRemind").value = it?.remindOn || (it?.renewalDate ? addDays(it.renewalDate, -it.remindDays) : "");
+  $("#fRemind").dataset.auto = it?.remindOn ? "" : "1";
   $("#fAuto").checked = !!it?.autoRenew;
   $("#fPhone").value = it?.phone || "";
   $("#fWebsite").value = it?.website || "";
   $("#fNotes").value = it?.notes || "";
-  $("#fDateLabel").textContent = dateLabel(cat);
+  $("#fDateLabel").textContent = g ? (past ? "Ended" : "Expires") : dateLabel(cat);
   $("#itemSave").textContent = it ? "Save changes" : "Add";
-  $("#renewSect").hidden = !it || !it.renewalDate || !!it.archivedAt;
+  $("#renewSect").hidden = !it || !!it.archivedAt || (!it.groupId && !it.renewalDate);
+  $("#renewHead").textContent = it?.groupId ? "Renewing or switching?" : "Renewed?";
+  $("#renewOpen").textContent = it?.groupId ? "Renew or switch provider" : "Mark as renewed";
   $("#renewForm").hidden = true;
   $("#renewBtnRow").hidden = false;
   $("#docsSect").hidden = !it;
   $("#dangerSect").hidden = !it;
   if (it) {
-    $("#archiveItem").textContent = it.archivedAt ? "Bring back" : "Archive (no longer have it)";
+    $("#archiveItem").textContent = it.groupId
+      ? (it.archivedAt ? "Make this the current provider" : "Move to history")
+      : (it.archivedAt ? "Bring back" : "Archive (no longer have it)");
     $("#deleteItem").textContent = "Delete";
     $("#deleteItem").classList.remove("confirm");
     renderDocs();
@@ -265,22 +442,27 @@ $("#fCategory").addEventListener("change", () => {
   $("#fDateLabel").textContent = dateLabel(cat);
 });
 $("#fTitle").addEventListener("input", () => { $("#fTitle").dataset.auto = ""; });
+/* The reminder follows the expiry date (a month before) until it's set by hand. */
+$("#fDate").addEventListener("change", () => {
+  if ($("#fRemind").dataset.auto && $("#fDate").value) $("#fRemind").value = addDays($("#fDate").value, -30);
+});
+$("#fRemind").addEventListener("change", () => { $("#fRemind").dataset.auto = ""; });
 
 function formValues() {
-  const cost = $("#fCost").value.trim();
   const t = (id) => $(id).value.trim() || null;
+  const g = sheetGroup();
   return {
-    category: $("#fCategory").value, title: $("#fTitle").value.trim(), provider: t("#fProvider"), covers: t("#fCovers"),
-    reference: t("#fReference"), cost: cost === "" ? null : Math.round(parseFloat(cost) * 100) / 100, frequency: $("#fFreq").value,
-    renewalDate: $("#fDate").value || null, remindDays: Number($("#fRemind").value), autoRenew: $("#fAuto").checked,
-    phone: t("#fPhone"), website: t("#fWebsite"), notes: t("#fNotes"),
+    category: $("#fCategory").value, title: g ? g.name : $("#fTitle").value.trim(), provider: t("#fProvider"), covers: t("#fCovers"),
+    reference: t("#fReference"), cost: toNum($("#fCost").value), frequency: $("#fFreq").value,
+    startDate: $("#fStart").value || null, renewalDate: $("#fDate").value || null, remindOn: $("#fRemind").value || null,
+    autoRenew: $("#fAuto").checked, phone: t("#fPhone"), website: t("#fWebsite"), notes: t("#fNotes"),
   };
 }
 
 $("#itemForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const v = formValues();
-  if (!v.title) return;
+  if (!v.title) { $("#fTitle").focus(); return; }
   const btn = $("#itemSave");
   btn.disabled = true;
   try {
@@ -290,10 +472,15 @@ $("#itemForm").addEventListener("submit", async (e) => {
       await store.updateItem(it.id, v);
       toast("Saved");
     } else {
-      const it = { id: uid(), householdId: household.id, archivedAt: null, created: Date.now(), docs: [], ...v };
+      const g = sheetGroup();
+      const it = {
+        id: uid(), householdId: household.id, groupId: g?.id || null, remindDays: 30, created: Date.now(), docs: [],
+        archivedAt: sheetOpts.past ? Date.now() : null, ...v,
+      };
       items.push(it);
       await store.addItem(it);
-      toast(`Added ${it.title}`, { label: "Add documents", run: () => openItem(it.id) });
+      const label = g ? `${it.provider || "Provider"} added to ${g.name}` : `Added ${it.title}`;
+      toast(label, { label: "Add documents", run: () => openItem(it.id) });
     }
     closeItem();
     renderHome();
@@ -305,27 +492,56 @@ $("#itemForm").addEventListener("submit", async (e) => {
   }
 });
 
-/* Renewing rolls the date on and keeps a line of history in the notes. */
+/* In a group, renewing moves the current provider into the history and starts a new entry.
+   Outside a group, it rolls the date on and keeps a line of history in the notes. */
 $("#renewOpen").onclick = () => {
   const it = sheetItem();
-  const base = it.renewalDate && daysUntil(it.renewalDate) > -60 ? it.renewalDate : todayIso();
-  $("#rDate").value = addMonths(base, 12);
+  const grouped = !!it.groupId;
+  const start = it.renewalDate && daysUntil(it.renewalDate) > -60 ? it.renewalDate : todayIso();
+  $("#rStartField").hidden = !grouped;
+  $("#rStart").value = start;
+  $("#rDate").value = addMonths(start, 12);
+  $("#rDateLabel").textContent = grouped ? "Expires" : "Next renewal date";
   $("#rCost").value = it.cost ?? "";
   $("#rProvider").value = it.provider || "";
+  $("#renewNote").textContent = grouped
+    ? `Saving moves ${it.provider || "the current provider"} into the history and makes this the current one. Change the provider if you're switching.`
+    : "The old price and provider are added to the notes, so you can compare next year.";
   $("#renewForm").hidden = false;
   $("#renewBtnRow").hidden = true;
   $("#rCost").focus();
 };
+$("#rStart").addEventListener("change", () => { if ($("#rStart").value) $("#rDate").value = addMonths($("#rStart").value, 12); });
 $("#renewCancel").onclick = () => { $("#renewForm").hidden = true; $("#renewBtnRow").hidden = false; };
 $("#renewForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const it = sheetItem();
-  const cost = $("#rCost").value.trim() === "" ? null : Math.round(parseFloat($("#rCost").value) * 100) / 100;
+  const cost = toNum($("#rCost").value);
   const provider = $("#rProvider").value.trim() || null;
-  const was = [it.cost != null ? costLabel(it) : null, it.provider ? `with ${it.provider}` : null].filter(Boolean).join(" ");
-  const line = `Renewed ${prettyDate(todayIso())}${was ? ` (was ${was})` : ""}.`;
-  const patch = { renewalDate: $("#rDate").value, cost, provider, notes: it.notes ? `${line}\n${it.notes}` : line };
+  const renewalDate = $("#rDate").value;
   try {
+    if (it.groupId) {
+      const same = (provider || "").toLowerCase() === (it.provider || "").toLowerCase();
+      const next = {
+        id: uid(), householdId: it.householdId, groupId: it.groupId, category: it.category, title: it.title, covers: it.covers,
+        frequency: it.frequency, autoRenew: it.autoRenew, remindDays: it.remindDays, provider, cost,
+        startDate: $("#rStart").value || null, renewalDate, remindOn: addDays(renewalDate, -30),
+        reference: same ? it.reference : null, phone: same ? it.phone : null, website: same ? it.website : null,
+        notes: null, archivedAt: null, created: Date.now(), docs: [],
+      };
+      it.archivedAt = Date.now();
+      items.push(next);
+      await store.updateItem(it.id, { archivedAt: it.archivedAt });
+      await store.addItem(next);
+      closeItem();
+      openHistory.add(it.groupId);
+      renderHome();
+      toast(`${provider || "New provider"} is now current, until ${prettyDate(renewalDate)}`, { label: "Add documents", run: () => openItem(next.id) });
+      return;
+    }
+    const was = [it.cost != null ? costLabel(it) : null, it.provider ? `with ${it.provider}` : null].filter(Boolean).join(" ");
+    const line = `Renewed ${prettyDate(todayIso())}${was ? ` (was ${was})` : ""}.`;
+    const patch = { renewalDate, cost, provider, remindOn: null, notes: it.notes ? `${line}\n${it.notes}` : line };
     Object.assign(it, patch);
     await store.updateItem(it.id, patch);
     toast(`${it.title} now renews ${prettyDate(it.renewalDate)}`);
@@ -340,7 +556,8 @@ $("#archiveItem").onclick = async () => {
   try {
     it.archivedAt = archivedAt;
     await store.updateItem(it.id, { archivedAt });
-    toast(archivedAt ? `Archived ${it.title}` : `${it.title} is back`);
+    if (it.groupId) toast(archivedAt ? `${it.provider || "Provider"} moved to history` : `${it.provider || "Provider"} is now current`);
+    else toast(archivedAt ? `Archived ${it.title}` : `${it.title} is back`);
     closeItem();
     renderHome();
   } catch (err) { fail(err); await reload(); }
@@ -358,7 +575,7 @@ $("#deleteItem").onclick = async () => {
     closeItem();
     renderHome();
     await store.deleteItem(it.id);
-    toast(`Deleted ${it.title}`);
+    toast(`Deleted ${it.groupId ? it.provider || "entry" : it.title}`);
   } catch (err) { fail(err); await reload(); }
 };
 /* ---------- Documents ---------- */
@@ -517,11 +734,14 @@ $("#pushOn").onclick = async () => { try { await push.enable(store); renderSetti
 $("#pushTest").onclick = () => push.test().catch(fail);
 
 $("#exportCsv").onclick = () => {
-  const head = ["Type", "Name", "Provider", "Covers", "Policy or account number", "Cost", "Paid", "Renewal or due date", "Remind days before", "Auto-renews", "Phone", "Website", "Notes", "Archived"];
-  const rows = items.slice().sort(sortItems).map((i) => [
-    category(i.category).label, i.title, i.provider, i.covers, i.reference, i.cost, i.frequency,
-    i.renewalDate ? i.renewalDate.split("-").reverse().join("/") : "", i.remindDays, i.autoRenew ? "Yes" : "No",
-    i.phone, i.website, i.notes, i.archivedAt ? "Yes" : "",
+  const uk = (iso) => (iso ? iso.split("-").reverse().join("/") : "");
+  const head = ["Area", "Group", "Type", "Name", "Status", "Provider", "Covers", "Policy or account number", "Cost", "Paid",
+    "Started", "Renewal or expiry date", "Remind on", "Auto-renews", "Phone", "Website", "Notes"];
+  const rows = items.slice().sort((a, b) => nameOf(a).localeCompare(nameOf(b)) || byNewest(a, b)).map((i) => [
+    areaById(areaIdOf(i)).label, groupOf(i)?.name || "", category(i.category).label, i.title,
+    i.groupId ? (i.archivedAt ? "Past" : "Current") : (i.archivedAt ? "Archived" : ""),
+    i.provider, i.covers, i.reference, i.cost, i.frequency, uk(i.startDate), uk(i.renewalDate), uk(i.remindOn),
+    i.autoRenew ? "Yes" : "No", i.phone, i.website, i.notes,
   ]);
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["\uFEFF" + toCsv([head, ...rows])], { type: "text/csv" }));
@@ -568,7 +788,12 @@ $("#csvChoose").onclick = () => $("#csvFile").click();
 $("#csvFile").addEventListener("change", async (e) => {
   const f = e.target.files[0];
   e.target.value = "";
-  if (f) readImport(await f.text());
+  if (!f) return;
+  /* Google Sheets and Excel downloads aren't always UTF-8; the older Windows encoding keeps £ signs intact. */
+  const bytes = await f.arrayBuffer();
+  let text;
+  try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { text = new TextDecoder("windows-1252").decode(bytes); }
+  readImport(text);
 });
 $("#csvRead").onclick = () => readImport($("#csvText").value);
 $("#mapGrid").addEventListener("change", (e) => {
@@ -624,7 +849,7 @@ $("#authForm").addEventListener("submit", async (e) => {
 
 async function reload() {
   household = await store.household();
-  items = await store.load(household.id);
+  ({ items, groups } = await store.load(household.id));
   if (!$("#home").hidden) renderHome();
   if (editing && !$("#itemSheet").hidden) { if (sheetItem()) renderDocs(); else closeItem(); }
 }

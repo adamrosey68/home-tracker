@@ -1,5 +1,5 @@
-// Called every hour by pg_cron. For each item with a renewal date it sends, to every member of its household:
-//  - an early reminder once the date is within the item's remind_days
+// Called every hour by pg_cron. For each current item it sends, to every member of its household:
+//  - an early reminder on its chosen remind_on date (or remind_days before, if no date was chosen)
 //  - a final reminder the day before (or on the day, or up to a week late if it was missed)
 // Only between 9am and 9pm UK time, so nobody gets woken up.
 import webpush from "npm:web-push@3.6.7";
@@ -17,7 +17,8 @@ webpush.setVapidDetails(
 type Sub = { endpoint: string; p256dh: string; auth: string; user_id: string };
 type Item = {
   id: string; household_id: string; title: string; provider: string | null; cost: number | null;
-  frequency: string; renewal_date: string; remind_days: number; reminded: string | null; auto_renew: boolean;
+  frequency: string; renewal_date: string | null; remind_days: number; remind_on: string | null; reminded: string | null;
+  auto_renew: boolean; item_groups: { name: string } | null;
 };
 
 async function sendTo(subs: Sub[], payload: object) {
@@ -48,11 +49,13 @@ function when(days: number) {
   return `${-days} day${days === -1 ? "" : "s"} ago`;
 }
 
-function message(it: Item, days: number) {
-  const verb = it.auto_renew ? "Renews" : "Due";
-  const title = days < 0 ? `${it.title} was due ${when(days)}` : `${it.title}: ${verb.toLowerCase()} ${when(days)}`;
-  const bits = [it.provider, it.cost != null ? `£${Number(it.cost).toFixed(2)}${per[it.frequency] ?? ""}` : null, prettyDate(it.renewal_date)];
-  const tail = it.auto_renew ? "Set to auto-renew. Worth checking for a better price." : "Tap to review and mark it renewed.";
+function message(it: Item, days: number | null) {
+  const name = it.item_groups?.name ?? it.title;
+  const verb = it.auto_renew ? "renews" : "due";
+  const title = days == null ? `Reminder: ${name}` : days < 0 ? `${name} was due ${when(days)}` : `${name}: ${verb} ${when(days)}`;
+  const bits = [it.provider, it.cost != null ? `£${Number(it.cost).toFixed(2)}${per[it.frequency] ?? ""}` : null,
+    it.renewal_date ? prettyDate(it.renewal_date) : null];
+  const tail = it.auto_renew ? "Set to auto-renew. Worth checking for a better price." : "Tap to review, renew or switch.";
   return { title, body: `${bits.filter(Boolean).join(" · ")}\n${tail}`, tag: `${it.id}-${it.reminded ?? ""}`, url: `/?item=${it.id}` };
 }
 
@@ -68,22 +71,23 @@ Deno.serve(async (req) => {
 
     const { data: items, error } = await sb
       .from("items")
-      .select("id, household_id, title, provider, cost, frequency, renewal_date, remind_days, reminded, auto_renew")
+      .select("id, household_id, title, provider, cost, frequency, renewal_date, remind_days, remind_on, reminded, auto_renew, item_groups(name)")
       .is("archived_at", null)
-      .not("renewal_date", "is", null)
       .or("reminded.is.null,reminded.eq.early");
     if (error) throw error;
 
     let sent = 0;
-    for (const it of (items ?? []) as Item[]) {
-      const days = toDay(it.renewal_date) - today;
+    for (const it of (items ?? []) as unknown as Item[]) {
+      const days = it.renewal_date ? toDay(it.renewal_date) - today : null;
+      const remindDue = it.remind_on ? toDay(it.remind_on) <= today : days != null && days <= it.remind_days;
       let stage: "early" | "final" | null = null;
-      if (days <= 1 && days >= -7) stage = "final";
-      else if (days <= it.remind_days && days > 1 && !it.reminded) stage = "early";
+      if (days == null) stage = it.remind_on && remindDue ? "final" : null;
+      else if (days <= 1 && days >= -7) stage = "final";
+      else if (days > 1 && remindDue && !it.reminded) stage = "early";
       if (!stage) continue;
 
       // Claim it first so overlapping runs never send the same reminder twice.
-      let claim = sb.from("items").update({ reminded: stage }).eq("id", it.id).eq("renewal_date", it.renewal_date);
+      let claim = sb.from("items").update({ reminded: stage }).eq("id", it.id);
       claim = it.reminded ? claim.eq("reminded", it.reminded) : claim.is("reminded", null);
       const { data: claimed } = await claim.select("id");
       if (!claimed?.length) continue;

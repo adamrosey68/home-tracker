@@ -14,9 +14,11 @@ function toItem(r) {
     id: r.id, householdId: r.household_id, category: r.category, title: r.title, provider: r.provider, reference: r.reference,
     covers: r.covers, cost: r.cost == null ? null : Number(r.cost), frequency: r.frequency, renewalDate: r.renewal_date,
     remindDays: r.remind_days, autoRenew: r.auto_renew, phone: r.phone, website: r.website, notes: r.notes,
+    groupId: r.group_id, startDate: r.start_date, remindOn: r.remind_on,
     archivedAt: ms(r.archived_at), created: ms(r.created_at), docs: [],
   };
 }
+const toGroup = (r) => ({ id: r.id, householdId: r.household_id, area: r.area, name: r.name, position: r.position });
 function itemRow(it) {
   const r = {};
   for (const k of FIELDS) if (k in it) r[k] = it[k] === "" ? null : it[k];
@@ -24,6 +26,9 @@ function itemRow(it) {
   if ("renewalDate" in it) r.renewal_date = it.renewalDate || null;
   if ("remindDays" in it) r.remind_days = it.remindDays;
   if ("autoRenew" in it) r.auto_renew = !!it.autoRenew;
+  if ("groupId" in it) r.group_id = it.groupId || null;
+  if ("startDate" in it) r.start_date = it.startDate || null;
+  if ("remindOn" in it) r.remind_on = it.remindOn || null;
   if ("archivedAt" in it) r.archived_at = iso(it.archivedAt);
   return r;
 }
@@ -59,14 +64,24 @@ function cloud() {
     async join(code) { return ok(await sb.rpc("join_household", { code })); },
 
     async load(householdId) {
-      const [its, docs] = await Promise.all([
+      const [its, docs, gs] = await Promise.all([
         sb.from("items").select("*").eq("household_id", householdId).order("renewal_date", { nullsFirst: false }),
         sb.from("item_docs").select("id, item_id, path, name, mime, created_at").eq("household_id", householdId).order("created_at"),
+        sb.from("item_groups").select("*").eq("household_id", householdId).order("position").order("created_at"),
       ]).then((rs) => rs.map(ok));
       const items = its.map(toItem);
       const index = new Map(items.map((i) => [i.id, i]));
       for (const d of docs) index.get(d.item_id)?.docs.push(toDoc(d));
-      return items;
+      return { items, groups: gs.map(toGroup) };
+    },
+    async addGroup(g) {
+      ok(await sb.from("item_groups").insert({ id: g.id, household_id: g.householdId, area: g.area, name: g.name, position: g.position }));
+    },
+    async updateGroup(id, patch) { ok(await sb.from("item_groups").update(patch).eq("id", id)); },
+    async deleteGroup(id) {
+      const docs = ok(await sb.from("item_docs").select("path, items!inner(group_id)").eq("items.group_id", id));
+      ok(await sb.from("item_groups").delete().eq("id", id));
+      if (docs.length) await sb.storage.from(BUCKET).remove(docs.map((d) => d.path));
     },
     async addItem(it) { ok(await sb.from("items").insert({ id: it.id, household_id: it.householdId, ...itemRow(it) })); },
     async updateItem(id, patch) { ok(await sb.from("items").update(itemRow(patch)).eq("id", id)); },
@@ -108,7 +123,7 @@ function cloud() {
     subscribe(onChange) {
       if (channel) return;
       channel = sb.channel("sync");
-      for (const table of ["items", "item_docs", "household_members"]) {
+      for (const table of ["items", "item_docs", "item_groups", "household_members"]) {
         channel.on("postgres_changes", { event: "*", schema: "public", table }, onChange);
       }
       channel.subscribe();
@@ -120,8 +135,8 @@ function cloud() {
 function local() {
   const KEY = "home-tracker-demo";
   const read = () => {
-    try { return { name: "Our home", items: [], docs: [], ...JSON.parse(localStorage.getItem(KEY)) }; }
-    catch { return { name: "Our home", items: [], docs: [] }; }
+    try { return { name: "Our home", items: [], docs: [], groups: [], ...JSON.parse(localStorage.getItem(KEY)) }; }
+    catch { return { name: "Our home", items: [], docs: [], groups: [] }; }
   };
   const edit = (fn) => { const d = read(); fn(d); localStorage.setItem(KEY, JSON.stringify(d)); };
   const user = { id: "local", email: null };
@@ -142,7 +157,18 @@ function local() {
     async join() { throw new Error("Sharing needs the online version."); },
     async load() {
       const d = read();
-      return d.items.map((it) => ({ ...it, docs: d.docs.filter((x) => x.itemId === it.id).map(({ itemId, ...x }) => x) }));
+      const items = d.items.map((it) => ({ ...it, docs: d.docs.filter((x) => x.itemId === it.id).map(({ itemId, ...x }) => x) }));
+      return { items, groups: d.groups.slice().sort((a, b) => a.position - b.position) };
+    },
+    async addGroup(g) { edit((d) => d.groups.push({ ...g })); },
+    async updateGroup(id, patch) { edit((d) => Object.assign(d.groups.find((g) => g.id === id) || {}, patch)); },
+    async deleteGroup(id) {
+      edit((d) => {
+        const gone = new Set(d.items.filter((i) => i.groupId === id).map((i) => i.id));
+        d.groups = d.groups.filter((g) => g.id !== id);
+        d.items = d.items.filter((i) => !gone.has(i.id));
+        d.docs = d.docs.filter((x) => !gone.has(x.itemId));
+      });
     },
     async addItem(it) { edit((d) => d.items.push(fromPatch(it))); },
     async updateItem(id, patch) { edit((d) => Object.assign(d.items.find((i) => i.id === id) || {}, fromPatch(patch))); },

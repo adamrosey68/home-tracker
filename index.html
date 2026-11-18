@@ -161,21 +161,25 @@
       <button class="btn quiet" id="sheetClose" type="button">Close</button>
     </div>
     <form class="iform" id="itemForm">
-      <div class="field wide">
+      <div class="field wide" id="typeField">
         <label for="fCategory">Type</label>
         <select id="fCategory"></select>
       </div>
-      <div class="field wide">
+      <div class="field wide" id="titleField">
         <label for="fTitle">Name</label>
-        <input type="text" id="fTitle" maxlength="120" required>
+        <input type="text" id="fTitle" maxlength="120">
       </div>
       <div class="field">
         <label for="fProvider">Provider</label>
         <input type="text" id="fProvider" maxlength="120" placeholder="e.g. Admiral">
       </div>
-      <div class="field">
+      <div class="field" id="coversField">
         <label for="fCovers">Covers</label>
         <input type="text" id="fCovers" maxlength="120" placeholder="e.g. Ford Focus AB12 CDE">
+      </div>
+      <div class="field" id="startField">
+        <label for="fStart">Started</label>
+        <input type="date" id="fStart">
       </div>
       <div class="field wide">
         <label for="fReference">Policy or account number</label>
@@ -193,9 +197,9 @@
         <label for="fDate" id="fDateLabel">Renewal date</label>
         <input type="date" id="fDate">
       </div>
-      <div class="field">
-        <label for="fRemind">Remind me</label>
-        <select id="fRemind"></select>
+      <div class="field" id="remindField">
+        <label for="fRemind">Remind me on</label>
+        <input type="date" id="fRemind">
       </div>
       <label class="tick wide"><input type="checkbox" id="fAuto"> Renews automatically</label>
       <div class="field">
@@ -214,22 +218,26 @@
     </form>
 
     <section class="sect" id="renewSect" hidden>
-      <h3>Renewed?</h3>
+      <h3 id="renewHead">Renewed?</h3>
       <form class="renew" id="renewForm" hidden>
         <div class="field">
-          <label for="rDate">Next renewal date</label>
-          <input type="date" id="rDate" required>
+          <label for="rProvider">Provider</label>
+          <input type="text" id="rProvider" maxlength="120">
         </div>
         <div class="field">
           <label for="rCost">New cost (£)</label>
           <input type="number" id="rCost" inputmode="decimal" min="0" step="0.01">
         </div>
-        <div class="field">
-          <label for="rProvider">Provider</label>
-          <input type="text" id="rProvider" maxlength="120">
+        <div class="field" id="rStartField">
+          <label for="rStart">Starts</label>
+          <input type="date" id="rStart">
         </div>
-        <div class="row"><button class="btn primary" type="submit">Save renewal</button><button class="btn quiet" type="button" id="renewCancel">Cancel</button></div>
-        <p class="note">The old price and provider are added to the notes, so you can compare next year.</p>
+        <div class="field">
+          <label for="rDate" id="rDateLabel">Next renewal date</label>
+          <input type="date" id="rDate" required>
+        </div>
+        <div class="row"><button class="btn primary" type="submit">Save</button><button class="btn quiet" type="button" id="renewCancel">Cancel</button></div>
+        <p class="note" id="renewNote"></p>
       </form>
       <div class="row" id="renewBtnRow"><button class="btn" id="renewOpen" type="button">Mark as renewed</button></div>
     </section>
