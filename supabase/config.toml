@@ -2,4 +2,4 @@ project_id = "home-tracker"
 
 [auth]
 site_url = "https://home-tracker-ahg.pages.dev"
-additional_redirect_urls = ["http://localhost:5180", "https://*.home-tracker-ahg.pages.dev"]
+additional_redirect_urls = ["http://localhost:5180", "https://*.home-tracker-ahg.pages.dev", "https://cruise-tracker-8q2.pages.dev", "https://*.cruise-tracker-8q2.pages.dev"]
