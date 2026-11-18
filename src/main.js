@@ -3,6 +3,7 @@ import { store } from "./store.js";
 import * as push from "./push.js";
 import { AREAS, CATEGORIES, FREQUENCIES, category, areaOf, guessCategory } from "./categories.js";
 import { FIELDS, parseTable, guessMapping, rowsToItems, toCsv } from "./csv.js";
+import { billIcon } from "./billIcons.js";
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -323,9 +324,13 @@ function lineForm(kind, l) {
     </div>
   </form>`;
 }
+function lineIcon(l) {
+  const { icon, tone } = billIcon(l.name, l.kind);
+  return `<span class="aicon sm ${tone}">${svg(icon)}</span>`;
+}
 function lineList(kind, ls) {
   const rows = ls.map((l) => budgetEdit === l.id ? `<li>${lineForm(kind, l)}</li>`
-    : `<li><button type="button" class="lrow" data-line="${l.id}"><span class="lname">${esc(l.name)}</span><span class="lamt">${esc(gbp.format(l.amount))}</span></button></li>`).join("");
+    : `<li><button type="button" class="lrow" data-line="${l.id}">${lineIcon(l)}<span class="lname">${esc(l.name)}</span><span class="lamt">${esc(gbp.format(l.amount))}</span></button></li>`).join("");
   return `<ul class="llist">${rows}${budgetEdit === `new-${kind}` ? `<li>${lineForm(kind)}</li>` : ""}</ul>
     ${budgetEdit === `new-${kind}` ? "" : `<button class="btn quiet ladd" type="button" data-line-new="${kind}">+ ${kind === "in" ? "Money in" : "Bill"}</button>`}`;
 }

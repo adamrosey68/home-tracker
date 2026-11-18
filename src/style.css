@@ -125,6 +125,8 @@ select { appearance: none; -webkit-appearance: none; background-image: linear-gr
 .aicon.bills { background: var(--a-bills-soft); color: var(--a-bills); }
 .aicon.car { background: var(--a-car-soft); color: var(--a-car); }
 .aicon.family { background: var(--a-family-soft); color: var(--a-family); }
+.aicon.in { background: var(--ok-soft); color: var(--ok); }
+.aicon.plain { background: var(--bg); color: var(--muted); }
 
 /* Home: totals and coming up */
 .dash { display: flex; flex-direction: column; gap: 16px; }
