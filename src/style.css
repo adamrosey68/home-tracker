@@ -11,6 +11,8 @@
   --warn-soft: #fbecd2;
   --danger: #b3261e;
   --danger-soft: #fbe3e0;
+  --ok: #1d7a3e;
+  --ok-soft: #e2f4e7;
   --a-home: #0b6b5d;
   --a-home-soft: #dcf0ea;
   --a-bills: #b06a00;
@@ -37,6 +39,8 @@
     --warn-soft: #3a2c12;
     --danger: #f2877f;
     --danger-soft: #3b1b18;
+    --ok: #63d48c;
+    --ok-soft: #15301f;
     --a-home: #4fc4ad;
     --a-home-soft: #19332c;
     --a-bills: #f0b95a;
@@ -187,8 +191,12 @@ ul { list-style: none; margin: 0; padding: 0; }
 .gedit { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--bg); }
 .gbody { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
 .gbody .row { margin-top: 2px; }
-.gcur { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); text-align: left; display: flex; align-items: center; gap: 10px; }
-.gprov { font-family: var(--font-display); font-weight: 700; font-size: 18px; overflow-wrap: anywhere; }
+.gbody h3 { color: var(--ok); }
+.gcur { width: 100%; padding: 10px 12px; border: 1.5px solid var(--ok); border-radius: 12px; background: var(--ok-soft); text-align: left; display: flex; align-items: center; gap: 10px; }
+.gprov { font-family: var(--font-display); font-weight: 700; font-size: 18px; overflow-wrap: anywhere; color: var(--ok); }
+.gcur .icost { font-weight: 600; }
+.pform { display: flex; flex-direction: column; gap: 4px; }
+.pform label { font-size: 12px; color: var(--muted); }
 .ghist { border-top: 1px solid var(--line); }
 .hfold { width: 100%; min-height: 44px; padding: 0 14px; border: 0; background: none; text-align: left; display: flex; align-items: center; gap: 8px; color: var(--muted); font-weight: 600; font-size: 14px; }
 .hfold .caret { width: 12px; font-size: 12px; }
@@ -257,7 +265,7 @@ body.noscroll { overflow: hidden; }
   .app { max-width: 1240px; }
   h1 { font-size: 30px; }
   #auth, #settings, #import { width: 100%; max-width: 640px; margin: 0 auto; }
-  .dash { display: grid; grid-template-columns: minmax(320px, 2fr) 3fr; align-items: start; }
+  .dash { max-width: 760px; }
   .filters { flex-direction: row; align-items: center; }
   .filters input { max-width: 360px; }
   .glist { display: block; columns: 3 360px; column-gap: 16px; }

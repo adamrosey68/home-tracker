@@ -1,7 +1,7 @@
 import "./style.css";
 import { store } from "./store.js";
 import * as push from "./push.js";
-import { AREAS, CATEGORIES, FREQUENCIES, category, areaOf, perYear, guessCategory } from "./categories.js";
+import { AREAS, CATEGORIES, FREQUENCIES, category, areaOf, guessCategory } from "./categories.js";
 import { FIELDS, parseTable, guessMapping, rowsToItems, toCsv } from "./csv.js";
 
 const $ = (s) => document.querySelector(s);
@@ -22,6 +22,7 @@ let deleteArmed = false;
 let newGroupArea = null;
 let editingGroup = null;
 let groupDeleteArmed = false;
+let pricing = null;
 const openHistory = new Set();
 let importRows = null, importMap = {};
 
@@ -45,7 +46,6 @@ const gbp0 = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP"
 const money = (n) => (Number.isInteger(n) ? gbp0 : gbp).format(n);
 const PER = { monthly: "/month", quarterly: "/quarter", yearly: "/year", "one-off": "" };
 const costLabel = (it) => (it.cost == null ? "" : money(it.cost) + PER[it.frequency]);
-const yearly = (it) => (it.archivedAt || it.cost == null ? 0 : it.cost * perYear(it.frequency));
 const toNum = (s) => (s.trim() === "" ? null : Math.round(parseFloat(s) * 100) / 100);
 
 /* ---------- Groups ---------- */
@@ -108,8 +108,10 @@ function fail(e) {
 
 /* ---------- Home ---------- */
 
+/* Only shown to welcome a new household; once there's anything in it, Coming up takes the top spot. */
 function renderTotals() {
   const live = items.filter((i) => !i.archivedAt);
+  $("#totals").hidden = !!(live.length || groups.length);
   if (!live.length && !groups.length) {
     $("#totals").innerHTML = `
       <div class="welcome">
@@ -118,21 +120,7 @@ function renderTotals() {
         <div class="row"><button class="btn primary" type="button" data-new-group="home">+ Start a group</button>
         <button class="btn" type="button" data-nav="import">Import from Google Sheets</button></div>
       </div>`;
-    return;
   }
-  const total = live.reduce((s, i) => s + yearly(i), 0);
-  const byArea = AREAS.map((a) => ({ ...a, sum: live.filter((i) => areaIdOf(i) === a.id).reduce((s, i) => s + yearly(i), 0) }))
-    .filter((a) => a.sum > 0);
-  const missing = live.filter((i) => i.cost == null).length;
-  $("#totals").innerHTML = `
-    <p class="tlabel">Costs a year</p>
-    <p class="tbig">${gbp0.format(total)}</p>
-    <p class="sub">About ${gbp0.format(total / 12)} a month${missing ? ` · ${missing} without a price` : ""}</p>
-    <div class="bars">${byArea.map((a) => `
-      <div class="bar"><span class="aicon sm ${a.id}">${svg(a.icon)}</span><span class="blabel">${esc(a.label)}</span>
-        <span class="btrack"><i class="${a.id}" style="width:${Math.max(3, (a.sum / (total || 1)) * 100).toFixed(1)}%"></i></span>
-        <span class="bval">${gbp0.format(a.sum)}</span></div>`).join("")}
-    </div>`;
 }
 
 function renderComing() {
@@ -198,12 +186,13 @@ function groupCard(g) {
   const all = groupItems(g);
   const current = all.filter((i) => !i.archivedAt).sort(sortItems);
   const past = all.filter((i) => i.archivedAt).sort(byNewest);
-  const sum = current.reduce((s, i) => s + yearly(i), 0);
+  const now = current[0];
   const open = openHistory.has(g.id) || (q() && past.some(textMatch));
   const renaming = editingGroup === g.id;
+  const pricingNow = now && pricing === now.id;
   return `<section class="pcard gcard">
     <div class="phdr"><span class="pname">${esc(g.name)}</span>
-      <span class="pmeta">${sum ? `${gbp0.format(sum)} a year` : ""}</span>
+      <span class="pmeta">${now?.cost != null ? esc(costLabel(now)) : ""}</span>
       <button class="gbtn" type="button" data-group-menu="${g.id}" aria-label="Rename or delete ${esc(g.name)}">⋯</button></div>
     ${renaming ? `<form class="gedit" data-group-rename="${g.id}">
       <label class="sr" for="gname-${g.id}">Group name</label>
@@ -215,9 +204,18 @@ function groupCard(g) {
     <div class="gbody">
       <h3>Current</h3>
       ${current.length ? current.map(currentRow).join("") : `<p class="empty">No current provider yet.</p>`}
+      ${pricingNow ? `<form class="pform" data-price-form="${now.id}">
+        <label for="price-${now.id}">New price per month (£)</label>
+        <div class="inline-form">
+          <input type="number" id="price-${now.id}" inputmode="decimal" min="0" step="0.01" value="${now.cost ?? ""}">
+          <button class="btn primary" type="submit">Save</button>
+          <button class="btn quiet" type="button" data-price-cancel>Cancel</button>
+        </div>
+      </form>` : ""}
       <div class="row">
-        ${current.length ? `<button class="btn" type="button" data-renew="${current[0].id}">Renew or switch</button>`
+        ${now ? `<button class="btn" type="button" data-renew="${now.id}">Renew or switch</button>`
           : `<button class="btn primary" type="button" data-add-entry="${g.id}">+ Current provider</button>`}
+        ${now?.frequency === "monthly" && !pricingNow ? `<button class="btn" type="button" data-price="${now.id}">Update monthly price</button>` : ""}
         <button class="btn quiet" type="button" data-add-past="${g.id}">+ Past provider</button>
       </div>
     </div>
@@ -233,10 +231,8 @@ function areaSection(a) {
   const loose = items.filter((i) => !i.groupId && !i.archivedAt && areaIdOf(i) === a.id && (!q() || textMatch(i))).sort(sortItems);
   const adding = newGroupArea === a.id;
   if (q() && !gs.length && !loose.length) return "";
-  const sum = items.filter((i) => !i.archivedAt && areaIdOf(i) === a.id).reduce((s, i) => s + yearly(i), 0);
   return `<section class="area">
     <div class="ahead"><span class="aicon ${a.id}">${svg(a.icon)}</span><h2>${esc(a.label)}</h2>
-      <span class="pmeta">${sum ? `${gbp0.format(sum)} a year` : ""}</span>
       <button class="btn quiet" type="button" data-new-group="${a.id}">+ Group</button></div>
     ${adding ? `<form class="inline-form" id="groupForm">
       <label class="sr" for="groupName">Group name</label>
@@ -296,6 +292,14 @@ document.addEventListener("click", async (e) => {
   if ((b = t("[data-add-entry]"))) return openItem(null, { groupId: b.dataset.addEntry });
   if ((b = t("[data-add-past]"))) return openItem(null, { groupId: b.dataset.addPast, past: true });
   if ((b = t("[data-renew]"))) { openItem(b.dataset.renew); return $("#renewOpen").click(); }
+  if ((b = t("[data-price]"))) {
+    pricing = b.dataset.price;
+    renderHome();
+    const input = document.getElementById(`price-${pricing}`);
+    input?.focus();
+    return input?.select();
+  }
+  if (t("[data-price-cancel]")) { pricing = null; return renderHome(); }
   if ((b = t("[data-history]"))) {
     const id = b.dataset.history;
     if (openHistory.has(id)) openHistory.delete(id); else openHistory.add(id);
@@ -338,6 +342,21 @@ document.addEventListener("submit", async (e) => {
       await store.addGroup(g);
       toast(`Created ${name}`, { label: "Add current provider", run: () => openItem(null, { groupId: g.id }) });
     } catch (err) { fail(err); await reload(); }
+  }
+  const priceForm = e.target.closest("[data-price-form]");
+  if (priceForm) {
+    e.preventDefault();
+    const it = items.find((i) => i.id === priceForm.dataset.priceForm);
+    const cost = toNum(priceForm.querySelector("input").value);
+    if (cost == null || cost === it.cost) { pricing = null; return renderHome(); }
+    const line = `${prettyDate(todayIso())}: price changed${it.cost != null ? ` from ${money(it.cost)}` : ""} to ${money(cost)} a month.`;
+    const patch = { cost, frequency: "monthly", notes: it.notes ? `${line}\n${it.notes}` : line };
+    Object.assign(it, patch);
+    pricing = null;
+    renderHome();
+    try { await store.updateItem(it.id, patch); toast(`${it.provider || nameOf(it)} is now ${money(cost)} a month`); }
+    catch (err) { fail(err); await reload(); }
+    return;
   }
   const rename = e.target.closest("[data-group-rename]");
   if (rename) {
