@@ -1,6 +1,8 @@
-// Called every hour by pg_cron. For each current item it sends, to every member of its household:
+// Called every hour by pg_cron. For each current Home Tracker item it sends, to every member of its household:
 //  - an early reminder on its chosen remind_on date (or remind_days before, if no date was chosen)
 //  - a final reminder the day before (or on the day, or up to a week late if it was missed)
+// Cruise Tracker payments get the same two reminders (early defaults to 14 days before), and
+// checklist items one on their due date. Each goes only to devices signed up in that app.
 // Only between 9am and 9pm UK time, so nobody gets woken up.
 import webpush from "npm:web-push@3.6.7";
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -20,6 +22,33 @@ type Item = {
   frequency: string; renewal_date: string | null; remind_days: number; remind_on: string | null; reminded: string | null;
   auto_renew: boolean; item_groups: { name: string } | null;
 };
+type Payment = {
+  id: string; household_id: string; cruise_id: string; label: string; amount: number; due_date: string;
+  remind_on: string | null; reminded: string | null; cruises: { name: string } | null;
+};
+type Task = { id: string; household_id: string; cruise_id: string; text: string; due_date: string; cruises: { name: string } | null };
+
+async function subsFor(householdId: string, app: "home" | "cruise") {
+  const { data: members } = await sb.from("household_members").select("user_id").eq("household_id", householdId);
+  const userIds = (members ?? []).map((m) => m.user_id);
+  if (!userIds.length) return [];
+  const { data: subs } = await sb.from("push_subscriptions").select("*").in("user_id", userIds).eq("app", app);
+  return (subs ?? []) as Sub[];
+}
+
+/* Mark a row as reminded before sending, so overlapping runs never send the same reminder twice. */
+async function claim(table: string, id: string, from: string | null, to: string) {
+  let q = sb.from(table).update({ reminded: to }).eq("id", id);
+  q = from ? q.eq("reminded", from) : q.is("reminded", null);
+  const { data } = await q.select("id");
+  return !!data?.length;
+}
+
+function stageFor(days: number, remindDue: boolean, reminded: string | null): "early" | "final" | null {
+  if (days <= 1 && days >= -7) return "final";
+  if (days > 1 && remindDue && !reminded) return "early";
+  return null;
+}
 
 async function sendTo(subs: Sub[], payload: object) {
   let sent = 0;
@@ -80,23 +109,46 @@ Deno.serve(async (req) => {
     for (const it of (items ?? []) as unknown as Item[]) {
       const days = it.renewal_date ? toDay(it.renewal_date) - today : null;
       const remindDue = it.remind_on ? toDay(it.remind_on) <= today : days != null && days <= it.remind_days;
-      let stage: "early" | "final" | null = null;
-      if (days == null) stage = it.remind_on && remindDue ? "final" : null;
-      else if (days <= 1 && days >= -7) stage = "final";
-      else if (days > 1 && remindDue && !it.reminded) stage = "early";
-      if (!stage) continue;
+      const stage = days == null ? (it.remind_on && remindDue ? "final" : null) : stageFor(days, remindDue, it.reminded);
+      if (!stage || !(await claim("items", it.id, it.reminded, stage))) continue;
+      sent += await sendTo(await subsFor(it.household_id, "home"), message({ ...it, reminded: stage }, days));
+    }
 
-      // Claim it first so overlapping runs never send the same reminder twice.
-      let claim = sb.from("items").update({ reminded: stage }).eq("id", it.id);
-      claim = it.reminded ? claim.eq("reminded", it.reminded) : claim.is("reminded", null);
-      const { data: claimed } = await claim.select("id");
-      if (!claimed?.length) continue;
+    const { data: payments, error: pErr } = await sb
+      .from("cruise_payments")
+      .select("id, household_id, cruise_id, label, amount, due_date, remind_on, reminded, cruises(name)")
+      .is("paid_on", null)
+      .not("due_date", "is", null)
+      .or("reminded.is.null,reminded.eq.early");
+    if (pErr) throw pErr;
+    for (const p of (payments ?? []) as unknown as Payment[]) {
+      const days = toDay(p.due_date) - today;
+      const remindDue = p.remind_on ? toDay(p.remind_on) <= today : days <= 14;
+      const stage = stageFor(days, remindDue, p.reminded);
+      if (!stage || !(await claim("cruise_payments", p.id, p.reminded, stage))) continue;
+      const name = p.cruises?.name ?? "Cruise";
+      sent += await sendTo(await subsFor(p.household_id, "cruise"), {
+        title: days < 0 ? `${name}: ${p.label} was due ${when(days)}` : `${name}: ${p.label} due ${when(days)}`,
+        body: `£${Number(p.amount).toFixed(2)} · ${prettyDate(p.due_date)}\nTap to mark it paid.`,
+        tag: `${p.id}-${stage}`, url: `/?cruise=${p.cruise_id}`,
+      });
+    }
 
-      const { data: members } = await sb.from("household_members").select("user_id").eq("household_id", it.household_id);
-      const userIds = (members ?? []).map((m) => m.user_id);
-      if (!userIds.length) continue;
-      const { data: subs } = await sb.from("push_subscriptions").select("*").in("user_id", userIds);
-      sent += await sendTo(subs ?? [], message({ ...it, reminded: stage }, days));
+    const { data: tasks, error: tErr } = await sb
+      .from("cruise_tasks")
+      .select("id, household_id, cruise_id, text, due_date, cruises(name)")
+      .eq("done", false)
+      .not("due_date", "is", null)
+      .is("reminded", null);
+    if (tErr) throw tErr;
+    for (const t of (tasks ?? []) as unknown as Task[]) {
+      const days = toDay(t.due_date) - today;
+      if (days > 0 || days < -7 || !(await claim("cruise_tasks", t.id, null, "final"))) continue;
+      sent += await sendTo(await subsFor(t.household_id, "cruise"), {
+        title: `${t.cruises?.name ?? "Cruise"}: ${t.text}`,
+        body: `On your checklist, due ${when(days)}.\nTap to tick it off.`,
+        tag: `${t.id}-task`, url: `/?cruise=${t.cruise_id}`,
+      });
     }
     return Response.json({ sent });
   } catch (e) {
