@@ -335,6 +335,43 @@ function iconPicker(id, l, kind) {
     <div class="ipick-grid">${opt("", "Automatic, from the name", auto.icon, "plain auto")}${ICON_CHOICES.map((c) => opt(c.key, c.label, c.icon, c.tone)).join("")}</div>
   </details>`;
 }
+const LENGTHS = [1, 3, 6, 12, 24, 36];
+/* Whole months from one date to another, or null if they don't line up on the same day of the month. */
+function wholeMonths(a, b) {
+  const n = (Number(b.slice(0, 4)) - Number(a.slice(0, 4))) * 12 + Number(b.slice(5, 7)) - Number(a.slice(5, 7));
+  return n > 0 && addMonths(a, n) === b ? n : null;
+}
+function lengthText(a, b) {
+  const n = wholeMonths(a, b);
+  if (n == null) { const d = dayNum(b) - dayNum(a); return `${d} day${d === 1 ? "" : "s"}`; }
+  return n % 12 ? `${n} month${n === 1 ? "" : "s"}` : `${n / 12} year${n === 12 ? "" : "s"}`;
+}
+function datesLine(l) {
+  if (!l.startedOn && !l.endsOn) return "";
+  const bits = [], d = l.endsOn ? daysUntil(l.endsOn) : null;
+  if (l.startedOn) bits.push(`${l.startedOn > todayIso() ? "Starts" : "Started"} ${prettyDate(l.startedOn)}`);
+  if (l.endsOn) {
+    bits.push(d < 0 ? `Expired ${prettyDate(l.endsOn)}` : d === 0 ? "Expires today"
+      : `Expires ${prettyDate(l.endsOn)}${d <= 30 ? ` (in ${d} day${d === 1 ? "" : "s"})` : ""}`);
+  }
+  if (l.startedOn && l.endsOn) bits.push(lengthText(l.startedOn, l.endsOn));
+  const bell = l.endsOn && l.remind && d > 30 ? ` <span class="lbell" title="We'll remind you a month before">${svg(BELL)}<span class="sr">Reminder on</span></span>` : "";
+  return `<span class="lsub${d == null ? "" : d < 0 ? " late" : d <= 30 ? " soon" : ""}">${bits.join(" · ")}${bell}</span>`;
+}
+const BELL = '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"></path>';
+function datesPicker(id, l) {
+  const n = l?.startedOn && l?.endsOn ? wholeMonths(l.startedOn, l.endsOn) : null;
+  return `<details class="ldates"${l?.startedOn || l?.endsOn ? " open" : ""}>
+    <summary>Start and expiry dates</summary>
+    <div class="ldgrid">
+      <label>Started<input type="date" class="lstart" value="${esc(l?.startedOn)}"></label>
+      <label>Length<select class="llen"><option value="">Choose…</option>${LENGTHS.map((m) =>
+        `<option value="${m}"${n === m ? " selected" : ""}>${m % 12 ? `${m} month${m === 1 ? "" : "s"}` : `${m / 12} year${m === 12 ? "" : "s"}`}</option>`).join("")}</select></label>
+      <label>Expires<input type="date" class="lend" value="${esc(l?.endsOn)}"></label>
+    </div>
+    <label class="tick"><input type="checkbox" class="lremind"${l?.remind === false ? "" : " checked"}> Remind us a month before it expires</label>
+  </details>`;
+}
 function lineForm(slot, l) {
   const kind = slotKind(slot);
   const id = l ? l.id : `new-${slot}`;
@@ -347,6 +384,7 @@ function lineForm(slot, l) {
       <label><input type="radio" name="fq-${id}" value="monthly"${isOneOff(l || {}) ? "" : " checked"}> Monthly</label>
       <label><input type="radio" name="fq-${id}" value="one-off"${isOneOff(l || {}) ? " checked" : ""}> One-off</label>
     </div>
+    ${datesPicker(id, l)}
     ${iconPicker(id, l, kind)}
     <div class="row">
       <button class="btn primary" type="submit">${l ? "Save" : "Add"}</button>
@@ -361,7 +399,7 @@ function lineIcon(l) {
 }
 function lineList(slot, ls) {
   const rows = ls.map((l) => budgetEdit === l.id ? `<li>${lineForm(slot, l)}</li>`
-    : `<li><button type="button" class="lrow${isOneOff(l) ? " once" : ""}" data-line="${l.id}">${lineIcon(l)}<span class="lname">${esc(l.name)}</span>${freqMark(l)}<span class="lamt">${esc(gbp.format(l.amount))}</span></button></li>`).join("");
+    : `<li><button type="button" class="lrow${isOneOff(l) ? " once" : ""}" data-line="${l.id}">${lineIcon(l)}<span class="lname">${esc(l.name)}${datesLine(l)}</span>${freqMark(l)}<span class="lamt">${esc(gbp.format(l.amount))}</span></button></li>`).join("");
   const label = slot === "in" ? "Money in" : slot === "out" ? "Bill" : "Item";
   return `<ul class="llist">${rows}${budgetEdit === `new-${slot}` ? `<li>${lineForm(slot)}</li>` : ""}</ul>
     ${budgetEdit === `new-${slot}` ? "" : `<button class="btn quiet ladd" type="button" data-line-new="${slot}">+ ${label}</button>`}`;
@@ -512,6 +550,17 @@ function renderHome() {
 
 $("#search").addEventListener("input", (e) => { filter.q = e.target.value; renderHome(); });
 $("#list").addEventListener("change", async (e) => {
+  const dates = e.target.closest(".ldates");
+  if (dates) {
+    const start = dates.querySelector(".lstart"), len = dates.querySelector(".llen"), end = dates.querySelector(".lend");
+    if (e.target === end) {
+      len.value = start.value && end.value && LENGTHS.includes(wholeMonths(start.value, end.value)) ? wholeMonths(start.value, end.value) : "";
+    } else if (len.value && (e.target === len || start.value)) {
+      if (!start.value) start.value = todayIso();
+      end.value = addMonths(start.value, Number(len.value));
+    }
+    return;
+  }
   const tot = e.target.closest("[data-bgroup-total], [data-bgroup-monthly]");
   if (tot) {
     const g = budgetGroups.find((x) => x.id === (tot.dataset.bgroupTotal || tot.dataset.bgroupMonthly));
@@ -637,17 +686,23 @@ document.addEventListener("submit", async (e) => {
     const id = lf.dataset.lineForm, slot = lf.dataset.slot;
     const icon = lf.querySelector(`input[name="ic-${id}"]:checked`)?.value || null;
     const frequency = lf.querySelector(`input[name="fq-${id}"]:checked`)?.value || "monthly";
+    const startedOn = lf.querySelector(".lstart").value || null, endsOn = lf.querySelector(".lend").value || null;
+    const remind = lf.querySelector(".lremind").checked;
+    if (startedOn && endsOn && endsOn < startedOn) { toast("The expiry date is before the start date"); return; }
     const existing = lines.find((l) => l.id === id);
     budgetEdit = null;
     try {
       if (existing) {
-        Object.assign(existing, { name, amount, icon, frequency });
+        const patch = { name, amount, icon, frequency, startedOn, remind };
+        if (endsOn !== (existing.endsOn || null)) patch.endsOn = endsOn;
+        Object.assign(existing, patch);
         renderHome();
         if (!shownLine(existing)) toast(`${name} is hidden because ${bgroupOf(existing).name} is set to Monthly only`);
-        await store.updateLine(id, { name, amount, icon, frequency });
+        await store.updateLine(id, patch);
       } else {
         const groupId = slot === "in" || slot === "out" ? null : slot;
-        const l = { id: uid(), householdId: household.id, month: budgetMonth, kind: slotKind(slot), name, amount, position: Date.now(), groupId, icon, frequency };
+        const l = { id: uid(), householdId: household.id, month: budgetMonth, kind: slotKind(slot), name, amount, position: Date.now(),
+          groupId, icon, frequency, startedOn, endsOn, remind };
         lines.push(l);
         budgetEdit = `new-${slot}`;
         renderHome();
@@ -1223,8 +1278,10 @@ $("#exportBackup").onclick = async () => {
     X.utils.book_append_sheet(wb, sheet([["Month", "Coming in (£)", "Going out (£)", "Left over (£)"], ...summary], [16, 14, 14, 14]), "Budget by month");
     const budget = months.flatMap((m) => monthLines(m).sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "in" ? -1 : 1))
       .map((l) => [monthLabel(m), l.kind === "in" ? "Coming in" : "Going out", bgroupOf(l)?.name || "", l.name, l.amount,
-        isOneOff(l) ? "One-off" : "Monthly", l.kind === "in" || countedLine(l) ? "Yes" : "No"]));
-    X.utils.book_append_sheet(wb, sheet([["Month", "In or out", "Group", "What", "Amount (£)", "How often", "In the totals"], ...budget], [16, 11, 22, 24, 11, 11, 12]), "Budget lines");
+        isOneOff(l) ? "One-off" : "Monthly", l.kind === "in" || countedLine(l) ? "Yes" : "No",
+        l.startedOn ? prettyDate(l.startedOn) : "", l.endsOn ? prettyDate(l.endsOn) : ""]));
+    X.utils.book_append_sheet(wb, sheet([["Month", "In or out", "Group", "What", "Amount (£)", "How often", "In the totals", "Started", "Expires"], ...budget],
+      [16, 11, 22, 24, 11, 11, 12, 13, 13]), "Budget lines");
 
     const vrows = vehicles.flatMap((v) => [
       ...[["Registration", v.registration], ["Make", v.make], ["Model", v.model], ["Nickname", v.nickname]].filter(([, x]) => x),
@@ -1360,6 +1417,18 @@ async function start(s) {
   push.resync(store);
   const want = new URLSearchParams(location.search).get("item");
   if (want) openItem(want);
+  const line = new URLSearchParams(location.search).get("line");
+  if (line) openLine(line);
+}
+function openLine(id) {
+  history.replaceState(null, "", location.pathname);
+  const l = lines.find((x) => x.id === id);
+  if (!l) return;
+  budgetMonth = l.month;
+  budgetEdit = l.id;
+  if (closedAreas.has("bills")) toggle(closedAreas, "bills");
+  renderHome();
+  $(`[data-line-form="${id}"]`)?.scrollIntoView({ block: "center" });
 }
 
 let started = false;
@@ -1376,6 +1445,8 @@ if ("serviceWorker" in navigator) {
     const url = e.data?.open && new URL(e.data.open);
     const id = url?.searchParams.get("item");
     if (id) openItem(id);
+    const line = url?.searchParams.get("line");
+    if (line) openLine(line);
   });
 }
 /* Dates like "In 3 days" go stale overnight. */

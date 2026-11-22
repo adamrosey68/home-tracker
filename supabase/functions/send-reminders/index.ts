@@ -2,7 +2,8 @@
 //  - an early reminder on its chosen remind_on date (or remind_days before, if no date was chosen)
 //  - a final reminder the day before (or on the day, or up to a week late if it was missed)
 // Cruise Tracker payments get the same two reminders (early defaults to 14 days before), and
-// checklist items one on their due date. Each goes only to devices signed up in that app.
+// checklist items one on their due date. Budget lines with an expiry date get one a month before and one the day before.
+// Each goes only to devices signed up in that app.
 // Only between 9am and 9pm UK time, so nobody gets woken up.
 import webpush from "npm:web-push@3.6.7";
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -26,6 +27,7 @@ type Payment = {
   id: string; household_id: string; cruise_id: string; label: string; amount: number; due_date: string;
   remind_on: string | null; reminded: string | null; cruises: { name: string } | null;
 };
+type BudgetLine = { id: string; household_id: string; name: string; amount: number; ends_on: string; reminded: string | null };
 type Task = { id: string; household_id: string; cruise_id: string; text: string; due_date: string; cruises: { name: string } | null };
 
 async function subsFor(householdId: string, app: "home" | "cruise") {
@@ -112,6 +114,36 @@ Deno.serve(async (req) => {
       const stage = days == null ? (it.remind_on && remindDue ? "final" : null) : stageFor(days, remindDue, it.reminded);
       if (!stage || !(await claim("items", it.id, it.reminded, stage))) continue;
       sent += await sendTo(await subsFor(it.household_id, "home"), message({ ...it, reminded: stage }, days));
+    }
+
+    // A budget line copied into later months keeps its dates, so copies sharing a name and expiry date are one reminder.
+    const { data: blines, error: bErr } = await sb
+      .from("budget_lines")
+      .select("id, household_id, name, amount, ends_on, reminded")
+      .eq("remind", true)
+      .gte("ends_on", new Date((today - 7) * dayMs).toISOString().slice(0, 10))
+      .order("month", { ascending: false });
+    if (bErr) throw bErr;
+    const expiring = new Map<string, BudgetLine[]>();
+    for (const l of (blines ?? []) as BudgetLine[]) {
+      const key = `${l.household_id}|${l.name.trim().toLowerCase()}|${l.ends_on}`;
+      expiring.set(key, [...(expiring.get(key) ?? []), l]);
+    }
+    for (const copies of expiring.values()) {
+      const l = copies[0];
+      const reminded = copies.some((c) => c.reminded === "final") ? "final" : copies.some((c) => c.reminded === "early") ? "early" : null;
+      if (reminded === "final") continue;
+      const days = toDay(l.ends_on) - today;
+      const stage = stageFor(days, days <= 30, reminded);
+      if (!stage) continue;
+      const { data: claimed } = await sb.from("budget_lines").update({ reminded: stage })
+        .in("id", copies.map((c) => c.id)).or(reminded ? `reminded.is.null,reminded.eq.${reminded}` : "reminded.is.null").select("id");
+      if (!claimed?.length) continue;
+      sent += await sendTo(await subsFor(l.household_id, "home"), {
+        title: days < 0 ? `${l.name} expired ${when(days)}` : `${l.name} expires ${when(days)}`,
+        body: `£${Number(l.amount).toFixed(2)} · ${prettyDate(l.ends_on)}\nTap to renew it or update the dates.`,
+        tag: `${l.id}-${stage}`, url: `/?line=${l.id}`,
+      });
     }
 
     const { data: payments, error: pErr } = await sb
