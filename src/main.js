@@ -642,6 +642,18 @@ function moveForm(acc, m, kind) {
     </div>
   </form>`;
 }
+function balanceForm(acc, bal) {
+  return `<form class="mform" data-bal-form="${acc.id}">
+    <p class="note full">The app thinks there's ${pounds(bal)} in it. Enter what's really in it now and the difference is recorded, for example as interest.</p>
+    <label>Money in it now (£)<input type="number" class="bamt" inputmode="decimal" min="0" step="0.01" value="${bal.toFixed(2)}" required></label>
+    <label>As of<input type="date" class="bdate" value="${todayIso()}" required></label>
+    <label class="full">What was the difference?<input type="text" class="bwhat" maxlength="120" placeholder="e.g. Interest" autocomplete="off"></label>
+    <div class="row">
+      <button class="btn primary" type="submit">Update</button>
+      <button class="btn quiet" type="button" data-move-cancel>Cancel</button>
+    </div>
+  </form>`;
+}
 function accountCard(acc) {
   const ms = movesOf(acc);
   let run = 0;
@@ -664,8 +676,9 @@ function accountCard(acc) {
       <div class="row savacts">
         <button class="btn" type="button" data-move-new="in" data-acc="${acc.id}">+ Paid in</button>
         <button class="btn" type="button" data-move-new="out" data-acc="${acc.id}">− Taken out</button>
+        <button class="btn quiet" type="button" data-move-new="bal" data-acc="${acc.id}">Update balance</button>
       </div>
-      ${newKind ? moveForm(acc, null, newKind) : ""}
+      ${newKind === "bal" ? balanceForm(acc, bal) : newKind ? moveForm(acc, null, newKind) : ""}
       ${rows.length ? `<ul class="mlist">${shown.map(({ m, bal: b }) => moveEdit === m.id ? `<li>${moveForm(acc, m)}</li>`
         : `<li><button type="button" class="mrow" data-move="${m.id}">
             <span class="mdate">${prettyDate(m.on, m.on.slice(0, 4) !== todayIso().slice(0, 4))}</span>
@@ -847,6 +860,7 @@ document.addEventListener("click", async (e) => {
     moveEdit = `new-${b.dataset.moveNew}-${b.dataset.acc}`;
     renderHome();
     $(`[data-move-form="${moveEdit}"] .mwhat`)?.focus();
+    $(`[data-bal-form="${b.dataset.acc}"] .bamt`)?.select();
     return;
   }
   if ((b = t("[data-move]"))) { moveEdit = b.dataset.move; return renderHome(); }
@@ -1005,6 +1019,22 @@ document.addEventListener("submit", async (e) => {
         await store.updateAccount(id, { name });
       }
     } catch (err) { fail(err); await reload(); }
+    return;
+  }
+  const bf2 = e.target.closest("[data-bal-form]");
+  if (bf2) {
+    e.preventDefault();
+    const acc = accounts.find((a) => a.id === bf2.dataset.balForm), now = toNum(bf2.querySelector(".bamt").value);
+    if (!acc || now == null) return;
+    const diff = Math.round((now - balanceOf(acc)) * 100) / 100;
+    moveEdit = null;
+    if (!diff) { renderHome(); toast("That's already the balance"); return; }
+    const m = { id: uid(), householdId: household.id, accountId: acc.id, created: Date.now(), on: bf2.querySelector(".bdate").value || todayIso(),
+      kind: diff > 0 ? "in" : "out", amount: Math.abs(diff), what: bf2.querySelector(".bwhat").value.trim() || "Balance updated" };
+    moves.push(m);
+    renderHome();
+    toast(`${acc.name} is now ${gbp.format(now)}`);
+    try { await store.addMove(m); } catch (err) { fail(err); await reload(); }
     return;
   }
   const mf = e.target.closest("[data-move-form]");

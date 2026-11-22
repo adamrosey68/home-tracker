@@ -149,6 +149,7 @@ select { appearance: none; -webkit-appearance: none; background-image: linear-gr
 .svstart label, .mform > label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
 .mform .lfq, .mform .row, .mform > label:first-of-type { grid-column: 1 / -1; }
 .mform { padding: 8px 0; }
+.mform .full { grid-column: 1 / -1; }
 .mlist { list-style: none; margin: 0; padding: 0; }
 .mlist li + li { border-top: 1px solid var(--line); }
 .mrow { width: 100%; min-height: 44px; padding: 8px 4px; border: 0; background: none; color: inherit; text-align: left; display: grid; grid-template-columns: 74px 1fr auto auto; gap: 10px; align-items: center; font-size: 14px; border-radius: 8px; }
