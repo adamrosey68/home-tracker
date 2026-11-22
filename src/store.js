@@ -23,10 +23,21 @@ const toVehicle = (r) => ({
   id: r.id, householdId: r.household_id, registration: r.registration, nickname: r.nickname, make: r.make, model: r.model,
   details: r.details || [], notes: r.notes, position: r.position,
 });
-const toLine = (r) => ({ id: r.id, householdId: r.household_id, month: r.month, kind: r.kind, name: r.name, amount: Number(r.amount), position: r.position });
+const toLine = (r) => ({
+  id: r.id, householdId: r.household_id, month: r.month, kind: r.kind, name: r.name, amount: Number(r.amount), position: r.position,
+  groupId: r.group_id, icon: r.icon,
+});
 function lineRow(l) {
   const r = {};
-  for (const k of ["month", "kind", "name", "amount", "position"]) if (k in l) r[k] = l[k];
+  for (const k of ["month", "kind", "name", "amount", "position", "icon"]) if (k in l) r[k] = l[k];
+  if ("groupId" in l) r.group_id = l.groupId || null;
+  return r;
+}
+const toBudgetGroup = (r) => ({ id: r.id, householdId: r.household_id, name: r.name, inTotal: r.in_total, position: r.position });
+function budgetGroupRow(g) {
+  const r = {};
+  for (const k of ["name", "position"]) if (k in g) r[k] = g[k];
+  if ("inTotal" in g) r.in_total = g.inTotal;
   return r;
 }
 function groupRow(g) {
@@ -85,18 +96,22 @@ function cloud() {
     async join(code) { return ok(await sb.rpc("join_household", { code })); },
 
     async load(householdId) {
-      const [its, docs, gs, vs, ls] = await Promise.all([
+      const [its, docs, gs, vs, ls, bgs] = await Promise.all([
         sb.from("items").select("*").eq("household_id", householdId).order("renewal_date", { nullsFirst: false }),
         sb.from("item_docs").select("id, item_id, path, name, mime, created_at").eq("household_id", householdId).order("created_at"),
         sb.from("item_groups").select("*").eq("household_id", householdId).order("position").order("created_at"),
         sb.from("vehicles").select("*").eq("household_id", householdId).order("position").order("created_at"),
         sb.from("budget_lines").select("*").eq("household_id", householdId).order("position").order("created_at"),
+        sb.from("budget_groups").select("*").eq("household_id", householdId).order("position").order("created_at"),
       ]).then((rs) => rs.map(ok));
       const items = its.map(toItem);
       const index = new Map(items.map((i) => [i.id, i]));
       for (const d of docs) index.get(d.item_id)?.docs.push(toDoc(d));
-      return { items, groups: gs.map(toGroup), vehicles: vs.map(toVehicle), lines: ls.map(toLine) };
+      return { items, groups: gs.map(toGroup), vehicles: vs.map(toVehicle), lines: ls.map(toLine), budgetGroups: bgs.map(toBudgetGroup) };
     },
+    async addBudgetGroup(g) { ok(await sb.from("budget_groups").insert({ id: g.id, household_id: g.householdId, ...budgetGroupRow(g) })); },
+    async updateBudgetGroup(id, patch) { ok(await sb.from("budget_groups").update(budgetGroupRow(patch)).eq("id", id)); },
+    async deleteBudgetGroup(id) { ok(await sb.from("budget_groups").delete().eq("id", id)); },
     async addLines(list) { ok(await sb.from("budget_lines").insert(list.map((l) => ({ id: l.id, household_id: l.householdId, ...lineRow(l) })))); },
     async updateLine(id, patch) { ok(await sb.from("budget_lines").update(lineRow(patch)).eq("id", id)); },
     async deleteLine(id) { ok(await sb.from("budget_lines").delete().eq("id", id)); },
@@ -150,7 +165,7 @@ function cloud() {
     subscribe(onChange) {
       if (channel) return;
       channel = sb.channel("sync");
-      for (const table of ["items", "item_docs", "item_groups", "vehicles", "budget_lines", "household_members"]) {
+      for (const table of ["items", "item_docs", "item_groups", "vehicles", "budget_lines", "budget_groups", "household_members"]) {
         channel.on("postgres_changes", { event: "*", schema: "public", table }, onChange);
       }
       channel.subscribe();
@@ -162,8 +177,8 @@ function cloud() {
 function local() {
   const KEY = "home-tracker-demo";
   const read = () => {
-    try { return { name: "Our home", items: [], docs: [], groups: [], vehicles: [], lines: [], ...JSON.parse(localStorage.getItem(KEY)) }; }
-    catch { return { name: "Our home", items: [], docs: [], groups: [], vehicles: [], lines: [] }; }
+    try { return { name: "Our home", items: [], docs: [], groups: [], vehicles: [], lines: [], budgetGroups: [], ...JSON.parse(localStorage.getItem(KEY)) }; }
+    catch { return { name: "Our home", items: [], docs: [], groups: [], vehicles: [], lines: [], budgetGroups: [] }; }
   };
   const edit = (fn) => { const d = read(); fn(d); localStorage.setItem(KEY, JSON.stringify(d)); };
   const user = { id: "local", email: null };
@@ -185,8 +200,11 @@ function local() {
     async load() {
       const d = read();
       const items = d.items.map((it) => ({ ...it, docs: d.docs.filter((x) => x.itemId === it.id).map(({ itemId, ...x }) => x) }));
-      return { items, groups: d.groups.slice().sort((a, b) => a.position - b.position), vehicles: d.vehicles.slice(), lines: d.lines.slice() };
+      return { items, groups: d.groups.slice().sort((a, b) => a.position - b.position), vehicles: d.vehicles.slice(), lines: d.lines.slice(), budgetGroups: d.budgetGroups.slice().sort((a, b) => a.position - b.position) };
     },
+    async addBudgetGroup(g) { edit((d) => d.budgetGroups.push({ ...g })); },
+    async updateBudgetGroup(id, patch) { edit((d) => Object.assign(d.budgetGroups.find((g) => g.id === id) || {}, patch)); },
+    async deleteBudgetGroup(id) { edit((d) => { d.budgetGroups = d.budgetGroups.filter((g) => g.id !== id); d.lines = d.lines.filter((l) => l.groupId !== id); }); },
     async addLines(list) { edit((d) => d.lines.push(...list.map((l) => ({ ...l })))); },
     async updateLine(id, patch) { edit((d) => Object.assign(d.lines.find((l) => l.id === id) || {}, patch)); },
     async deleteLine(id) { edit((d) => { d.lines = d.lines.filter((l) => l.id !== id); }); },

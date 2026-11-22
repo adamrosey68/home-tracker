@@ -24,7 +24,28 @@ const I = {
   coins: '<ellipse cx="9" cy="7" rx="5" ry="2.5"></ellipse><path d="M4 7v4c0 1.4 2.2 2.5 5 2.5s5-1.1 5-2.5V7"></path><path d="M10 15.5c.6 1.2 2.6 2 5 2 2.8 0 5-1.1 5-2.5v-4c0-1.4-2.2-2.5-5-2.5"></path>',
   pound: '<circle cx="12" cy="12" r="9"></circle><path d="M14.5 8.3A2.5 2.5 0 0 0 10 9.8V16M8.5 12.5h4.5M8.5 16h7"></path>',
   receipt: '<path d="M6 3h12v18l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4L6 21z"></path><path d="M9 8h6M9 12h6"></path>',
+  paw: '<circle cx="6" cy="10" r="1.8"></circle><circle cx="9.5" cy="5.8" r="1.8"></circle><circle cx="14.5" cy="5.8" r="1.8"></circle><circle cx="18" cy="10" r="1.8"></circle><path d="M12 11c-3 0-5.5 4.2-5.5 6.5 0 1.6 1.3 2.5 2.7 2.5 1.2 0 1.8-.6 2.8-.6s1.6.6 2.8.6c1.4 0 2.7-.9 2.7-2.5C17.5 15.2 15 11 12 11z"></path>',
+  gift: '<rect x="3.5" y="8" width="17" height="4" rx="1"></rect><path d="M5 12v8.5h14V12M12 8v12.5M12 8S10.5 3.5 8 4.2C6 4.8 7 8 12 8zM12 8s1.5-4.5 4-3.8C18 4.8 17 8 12 8z"></path>',
+  gym: '<path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"></path>',
+  school: '<path d="m2.5 9 9.5-5 9.5 5-9.5 5z"></path><path d="M6.5 11v5c0 1.5 2.5 3 5.5 3s5.5-1.5 5.5-3v-5M21.5 9v6"></path>',
+  plane: '<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"></path>',
+  bag: '<path d="M5 8h14l-1 13H6z"></path><path d="M9 10V6.5a3 3 0 0 1 6 0V10"></path>',
+  beauty: '<circle cx="6.5" cy="17.5" r="3"></circle><circle cx="17.5" cy="17.5" r="3"></circle><path d="M8.6 15.4 19 4M15.4 15.4 5 4"></path>',
+  coffee: '<path d="M4 9h13v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"></path><path d="M17 10.5h1.5a2.5 2.5 0 0 1 0 5H17M8 3.5v2.5M12 3.5v2.5"></path>',
+  child: '<circle cx="12" cy="5.5" r="2.5"></circle><path d="M8 21v-5.5L6 12l3.5-3h5L18 12l-2 3.5V21M10.5 21v-4h3v4"></path>',
 };
+
+/* Icons you can choose for a line yourself, with the colour each one uses. */
+export const ICON_CHOICES = [
+  ["house", "Home", "home"], ["flat", "Flat", "home"], ["water", "Water", "home"], ["flame", "Gas and electric", "bills"],
+  ["council", "Council", "home"], ["tv", "TV", "bills"], ["play", "Streaming", "bills"], ["phone", "Phone", "bills"],
+  ["bank", "Bank and cards", "bills"], ["shield", "Insurance", "family"], ["health", "Health", "family"], ["car", "Car", "car"],
+  ["fuel", "Fuel", "car"], ["food", "Food", "family"], ["kitchen", "Eating out", "home"], ["coffee", "Coffee", "home"],
+  ["bag", "Shopping", "family"], ["beauty", "Hair and beauty", "family"], ["gym", "Gym", "family"], ["child", "Kids", "family"],
+  ["school", "School", "family"], ["paw", "Pets", "home"], ["gift", "Gifts", "family"], ["plane", "Travel", "car"],
+  ["washer", "Washing machine", "home"], ["dishwasher", "Dishwasher", "home"], ["fridge", "Fridge", "home"], ["oven", "Oven", "home"],
+  ["tools", "Repairs", "home"], ["person", "Person", "in"], ["pound", "Money", "in"], ["coins", "Savings", "in"], ["receipt", "Other", "plain"],
+].map(([key, label, tone]) => ({ key, label, tone, icon: I[key] }));
 
 const RULES = [
   [/flat mortgage/i, "flat", "home"],
@@ -48,7 +69,9 @@ const RULES = [
   [/food|milk|grocer|shop/i, "food", "family"],
 ];
 
-export function billIcon(name, kind) {
+export function billIcon(name, kind, chosen) {
+  const pick = chosen && ICON_CHOICES.find((c) => c.key === chosen);
+  if (pick) return { icon: pick.icon, tone: pick.tone };
   if (kind === "in") {
     if (/cash ?back|interest|refund/i.test(name)) return { icon: I.coins, tone: "in" };
     if (/wage|salary|pay|benefit|\bben\b|pension|other/i.test(name)) return { icon: I.pound, tone: "in" };
