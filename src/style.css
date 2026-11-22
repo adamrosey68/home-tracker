@@ -352,8 +352,22 @@ ul { list-style: none; margin: 0; padding: 0; }
 .bghidden li span:last-child { font-variant-numeric: tabular-nums; }
 .lfreq { flex: none; display: inline-grid; place-items: center; color: var(--muted); }
 .lfreq svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.lfreq.term { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); }
+.lamtw { display: flex; flex-direction: column; align-items: flex-end; flex: none; }
+.lyr { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.bgyear { margin: 0; font-size: 13px; color: var(--muted); }
+.bgyear b { color: var(--fg); font-weight: 600; }
+.lterms { grid-column: 1 / -1; display: grid; gap: 6px; }
+.lterms .hint { margin: 0; font-size: 13px; color: var(--muted); }
+.ltgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.ltgrid label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.ltgrid input { min-width: 0; }
+.ltsum { margin: 0; font-size: 14px; color: var(--muted); }
+.ltsum b { color: var(--fg); }
+@media (max-width: 400px) { .ltgrid { grid-template-columns: 1fr 1fr; } }
 .lfreq.once { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 9px; background: var(--warn-soft); color: var(--warn); }
-.lfq { grid-column: 1 / -1; display: inline-grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); max-width: 260px; }
+.lfq { grid-column: 1 / -1; display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 3px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); max-width: 260px; }
+.lfq:has(label:nth-child(3)) { max-width: 360px; }
 .lfq label { min-height: 36px; display: grid; place-items: center; border-radius: 8px; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
 .lfq input { position: absolute; opacity: 0; pointer-events: none; }
 .lfq label:has(input:checked) { background: var(--surface); color: var(--fg); box-shadow: 0 1px 3px rgba(0, 0, 0, .15); }

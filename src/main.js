@@ -327,8 +327,31 @@ const isOneOff = (l) => l.frequency === "one-off";
 const shownLine = (l) => !(isOneOff(l) && bgroupOf(l)?.monthlyOnly);
 const countedLine = (l) => l.kind === "out" && shownLine(l) && (!bgroupOf(l) || bgroupOf(l).inTotal);
 const REPEAT = '<path d="M17 2.5 20.5 6 17 9.5"></path><path d="M3.5 11.5V10a4 4 0 0 1 4-4h13M7 21.5 3.5 18 7 14.5"></path><path d="M20.5 12.5V14a4 4 0 0 1-4 4h-13"></path>';
-const freqMark = (l) => (isOneOff(l) ? `<span class="lfreq once">One-off</span>`
+const isTermly = (l) => l.frequency === "termly";
+const freqMark = (l) => (isOneOff(l) ? `<span class="lfreq once">One-off</span>` : isTermly(l) ? `<span class="lfreq term">Termly</span>`
   : `<span class="lfreq" title="Monthly">${svg(REPEAT)}<span class="sr">Monthly</span></span>`);
+const termsTotal = (terms) => Math.round((terms || []).reduce((s, t) => s + t, 0) * 100) / 100;
+/* What a regular line costs over a year: twelve months, or its terms added up. One-offs have no yearly figure. */
+const yearlyOf = (l) => (isOneOff(l) ? null : isTermly(l) ? termsTotal(l.terms) : Math.round(l.amount * 12 * 100) / 100);
+function yearNote(l) {
+  const y = yearlyOf(l);
+  if (y == null) return "";
+  return `<span class="lyr">${esc(gbp.format(y))} a year${isTermly(l) && l.terms?.length ? ` · ${l.terms.length} terms` : ""}</span>`;
+}
+function termsBox(id, l) {
+  const t = l?.terms || [];
+  return `<div class="lterms"${isTermly(l || {}) ? "" : " hidden"}>
+    <p class="hint">Put in what each term costs. Leave Term 4 empty if there are only three terms.</p>
+    <div class="ltgrid">${[0, 1, 2, 3].map((i) => `<label>Term ${i + 1}<input type="number" class="tamt" inputmode="decimal" min="0" step="0.01" placeholder="£" value="${t[i] ?? ""}"></label>`).join("")}</div>
+    <p class="ltsum">${termsSummary(t)}</p>
+  </div>`;
+}
+function termsSummary(t) {
+  if (!t.length) return "";
+  const y = termsTotal(t);
+  return `${t.length} term${t.length === 1 ? "" : "s"}: <b>${esc(gbp.format(y))} a year</b>, about ${esc(gbp.format(Math.round((y / 12) * 100) / 100))} a month`;
+}
+const readTerms = (box) => [...box.querySelectorAll(".tamt")].map((i) => toNum(i.value)).filter((n) => n != null);
 
 function iconPicker(id, l, kind) {
   const auto = billIcon(l?.name || "", kind);
@@ -502,9 +525,11 @@ function lineForm(slot, l) {
     <label class="sr" for="la-${id}">Amount (£)</label>
     <input type="number" id="la-${id}" class="lamt" inputmode="decimal" min="0" step="0.01" placeholder="£" value="${l ? l.amount : ""}" required>
     <div class="lfq" role="radiogroup" aria-label="How often">
-      <label><input type="radio" name="fq-${id}" value="monthly"${isOneOff(l || {}) ? "" : " checked"}> Monthly</label>
+      <label><input type="radio" name="fq-${id}" value="monthly"${!l || l.frequency === "monthly" ? " checked" : ""}> Monthly</label>
+      <label><input type="radio" name="fq-${id}" value="termly"${isTermly(l || {}) ? " checked" : ""}> Termly</label>
       <label><input type="radio" name="fq-${id}" value="one-off"${isOneOff(l || {}) ? " checked" : ""}> One-off</label>
     </div>
+    ${termsBox(id, l)}
     <label class="sr" for="lnote-${id}">Note</label>
     <input type="text" id="lnote-${id}" class="lnote" maxlength="200" placeholder="Note, e.g. renews 30 Nov at £7.00" value="${esc(l?.note)}" autocomplete="off">
     ${spendPicker(l)}
@@ -524,7 +549,7 @@ function lineIcon(l) {
 }
 function lineList(slot, ls) {
   const rows = ls.map((l) => budgetEdit === l.id ? `<li>${lineForm(slot, l)}</li>`
-    : `<li><button type="button" class="lrow${isOneOff(l) ? " once" : ""}" data-line="${l.id}">${lineIcon(l)}<span class="lname">${esc(l.name)}${l.note ? `<span class="lsub lnotes">${esc(l.note)}</span>` : ""}${spendLine(l)}${datesLine(l)}${planLine(l)}</span>${freqMark(l)}<span class="lamt">${esc(gbp.format(l.amount))}</span></button></li>`).join("");
+    : `<li><button type="button" class="lrow${isOneOff(l) ? " once" : ""}" data-line="${l.id}">${lineIcon(l)}<span class="lname">${esc(l.name)}${l.note ? `<span class="lsub lnotes">${esc(l.note)}</span>` : ""}${spendLine(l)}${datesLine(l)}${planLine(l)}</span>${freqMark(l)}<span class="lamtw"><span class="lamt">${esc(gbp.format(l.amount))}</span>${yearNote(l)}</span></button></li>`).join("");
   const label = slot === "in" ? "Money in" : slot === "out" ? "Bill" : "Item";
   return `<ul class="llist">${rows}${budgetEdit === `new-${slot}` ? `<li>${lineForm(slot)}</li>` : ""}</ul>
     ${budgetEdit === `new-${slot}` ? "" : `<button class="btn quiet ladd" type="button" data-line-new="${slot}">+ ${label}</button>`}`;
@@ -556,6 +581,7 @@ function bgroupSect(g, all) {
       <label class="tick bgtick"><input type="checkbox" data-bgroup-total="${g.id}"${g.inTotal ? " checked" : ""}> Count in the totals</label>
       <label class="tick bgtick"><input type="checkbox" data-bgroup-monthly="${g.id}"${g.monthlyOnly ? " checked" : ""}> Monthly only</label>
     </div>
+    ${gl.some((l) => yearlyOf(l) != null) ? `<p class="bgyear">Regular items come to <b>${esc(gbp.format(Math.round(gl.reduce((s, l) => s + (yearlyOf(l) ?? 0), 0) * 100) / 100))}</b> a year</p>` : ""}
     ${hidden.length ? `<div class="bghidden"><p>${hidden.length} one-off${hidden.length === 1 ? "" : "s"} hidden (${esc(gbp.format(sum(hidden)))}), not in the totals:</p><ul>${hidden.map((l) => `<li><span>${esc(l.name)}</span><span>${esc(gbp.format(l.amount))}</span></li>`).join("")}</ul></div>` : ""}
     ${lineList(g.id, gl)}
   </div>`;
@@ -795,10 +821,21 @@ $("#list").addEventListener("keydown", (e) => {
   addSpend(add.querySelector("[data-spend-add]").dataset.spendAdd);
 });
 $("#list").addEventListener("input", (e) => {
+  const tb = e.target.classList.contains("tamt") && e.target.closest(".lterms");
+  if (tb) {
+    const t = readTerms(tb);
+    tb.querySelector(".ltsum").innerHTML = termsSummary(t);
+    if (t.length) tb.closest(".lform").querySelector("input.lamt").value = (Math.round((termsTotal(t) / 12) * 100) / 100).toFixed(2);
+    return;
+  }
   const plan = e.target.closest(".lplan");
   if (plan) plan.querySelector(".psumwrap").innerHTML = planSummary(readPlan(plan));
 });
 $("#list").addEventListener("change", async (e) => {
+  if (e.target.name?.startsWith("fq-")) {
+    e.target.closest(".lform").querySelector(".lterms").hidden = e.target.value !== "termly";
+    return;
+  }
   if (e.target.closest(".lplan")) return;
   const dates = e.target.closest(".ldates");
   if (dates) {
@@ -1073,6 +1110,7 @@ document.addEventListener("submit", async (e) => {
     const id = lf.dataset.lineForm, slot = lf.dataset.slot;
     const icon = lf.querySelector(`input[name="ic-${id}"]:checked`)?.value || null;
     const frequency = lf.querySelector(`input[name="fq-${id}"]:checked`)?.value || "monthly";
+    const terms = frequency === "termly" ? readTerms(lf) : [];
     const plan = readPlan(lf);
     const startedOn = lf.querySelector(".lstart").value || plan[0]?.from || null;
     const endsOn = lf.querySelector(".lend").value || plan.at(-1)?.to || null;
@@ -1083,7 +1121,7 @@ document.addEventListener("submit", async (e) => {
     budgetEdit = null;
     try {
       if (existing) {
-        const patch = { name, amount, icon, frequency, startedOn, remind, plan, note };
+        const patch = { name, amount, icon, frequency, startedOn, remind, plan, note, terms };
         if (endsOn !== (existing.endsOn || null)) patch.endsOn = endsOn;
         Object.assign(existing, patch);
         renderHome();
@@ -1092,7 +1130,7 @@ document.addEventListener("submit", async (e) => {
       } else {
         const groupId = slot === "in" || slot === "out" ? null : slot;
         const l = { id: uid(), householdId: household.id, month: budgetMonth, kind: slotKind(slot), name, amount, position: Date.now(),
-          groupId, icon, frequency, startedOn, endsOn, remind, plan, note };
+          groupId, icon, frequency, startedOn, endsOn, remind, plan, note, terms };
         lines.push(l);
         budgetEdit = `new-${slot}`;
         renderHome();
@@ -1692,7 +1730,7 @@ $("#exportBackup").onclick = async () => {
     X.utils.book_append_sheet(wb, sheet([["Month", "Coming in (£)", "Going out (£)", "Left over (£)"], ...summary], [16, 14, 14, 14]), "Budget by month");
     const budget = months.flatMap((m) => monthLines(m).sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "in" ? -1 : 1))
       .map((l) => [monthLabel(m), l.kind === "in" ? "Coming in" : "Going out", bgroupOf(l)?.name || "", l.name, l.amount,
-        isOneOff(l) ? "One-off" : "Monthly", l.kind === "in" || countedLine(l) ? "Yes" : "No",
+        isOneOff(l) ? "One-off" : isTermly(l) ? `Termly (${(l.terms || []).map((t) => gbp.format(t)).join(", ")})` : "Monthly", l.kind === "in" || countedLine(l) ? "Yes" : "No",
         l.startedOn ? prettyDate(l.startedOn) : "", l.endsOn ? prettyDate(l.endsOn) : "", l.note || ""]));
     X.utils.book_append_sheet(wb, sheet([["Month", "In or out", "Group", "What", "Amount (£)", "How often", "In the totals", "Started", "Expires", "Note"], ...budget],
       [16, 11, 22, 24, 11, 11, 12, 13, 13, 40]), "Budget lines");
