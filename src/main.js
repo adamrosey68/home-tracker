@@ -343,12 +343,20 @@ const yearlyOf = (l) => (isOneOff(l) ? null : isTermly(l) ? termsTotal(l.terms) 
 function yearNote(l) {
   const y = yearlyOf(l);
   if (y == null) return "";
-  return `<span class="lyr">${esc(gbp.format(y))} a year${isTermly(l) && l.terms?.length ? ` · ${l.terms.length} terms` : ""}</span>`;
+  return `<span class="lyr">${esc(gbp.format(y))} a year</span>`;
+}
+/* A termly line's amount is just the terms ticked as paid in its month, so it counts nothing in other months. */
+const paidOf = (terms, paid) => round2((paid || []).filter((i) => i < terms.length).reduce((s, i) => s + terms[i], 0));
+const termLabel = (l) => (l.paidTerms || []).filter((i) => i < l.terms.length).map((i) => `Term ${i + 1}`).join(" and ");
+function termTicks(l) {
+  if (!isTermly(l) || !l.terms?.length || budgetEdit === l.id) return "";
+  return `<div class="ltpaid"><span class="ltq">Paid this month?</span>${l.terms.map((t, i) => `<label class="tick"><input type="checkbox" data-term-paid="${l.id}" value="${i}"${(l.paidTerms || []).includes(i)
+    ? " checked" : ""}> Term ${i + 1} <b>${esc(gbp.format(t))}</b></label>`).join("")}</div>`;
 }
 function termsBox(id, l) {
   const t = l?.terms || [];
   return `<div class="lterms"${isTermly(l || {}) ? "" : " hidden"}>
-    <p class="hint">Put in what each term costs. Leave Term 4 empty if there are only three terms.</p>
+    <p class="hint">Put in what each term costs. Leave the rest empty if there are fewer terms. On the list, tick a term in the month it's paid: only then does it count towards that month.</p>
     <div class="ltgrid">${[0, 1, 2, 3].map((i) => `<label>Term ${i + 1}<input type="number" class="tamt" inputmode="decimal" min="0" step="0.01" placeholder="£" value="${t[i] ?? ""}"></label>`).join("")}</div>
     <p class="ltsum">${termsSummary(t)}</p>
   </div>`;
@@ -356,7 +364,7 @@ function termsBox(id, l) {
 function termsSummary(t) {
   if (!t.length) return "";
   const y = termsTotal(t);
-  return `${t.length} term${t.length === 1 ? "" : "s"}: <b>${esc(gbp.format(y))} a year</b>, about ${esc(gbp.format(Math.round((y / 12) * 100) / 100))} a month`;
+  return `${t.length} term${t.length === 1 ? "" : "s"}: <b>${esc(gbp.format(y))} a year</b>`;
 }
 const readTerms = (box) => [...box.querySelectorAll(".tamt")].map((i) => toNum(i.value)).filter((n) => n != null);
 
@@ -532,6 +540,7 @@ const fundedOf = (l) => round2(fundsInto(l).reduce((s, f) => s + f.amount, 0));
 function fundLine(l) {
   const fs = fundsInto(l);
   if (!fs.length) return "";
+  if (isTermly(l) && !l.amount) return `<span class="lsub">${fs.map((f) => `${esc(f.pot.name)} set to pay ${esc(gbp.format(f.amount))}`).join(" · ")}, but it's not paid this month</span>`;
   const rest = round2(l.amount - fundedOf(l));
   return `<span class="lsub fund">${fs.map((f) => `${esc(gbp.format(f.amount))} from ${esc(f.pot.name)}`).join(" · ")}${rest > 0
     ? ` · ${esc(gbp.format(rest))} from elsewhere` : " · <b>all covered</b>"}</span>`;
@@ -552,7 +561,7 @@ function potBox(p, outs) {
     ${outs.length ? `<div class="fdadd">
       <label class="sr" for="fd-to-${p.id}">Pays towards</label>
       <select id="fd-to-${p.id}" class="fd-to"><option value="">Pays towards…</option>${outs.map((o) =>
-        `<option value="${o.id}">${esc(o.name)} (${esc(gbp.format(o.amount))})</option>`).join("")}</select>
+        `<option value="${o.id}">${esc(o.name)} (${isTermly(o) && !o.amount ? "not paid this month" : esc(gbp.format(o.amount))})</option>`).join("")}</select>
       <label class="sr" for="fd-amt-${p.id}">How much (£)</label>
       <input type="number" id="fd-amt-${p.id}" class="fd-amt" inputmode="decimal" min="0" step="0.01" placeholder="£">
       <button class="btn" type="button" data-fund-add="${p.id}">Add</button>
@@ -572,7 +581,7 @@ function lineForm(slot, l) {
     <label class="sr" for="ln-${id}">What</label>
     <input type="text" id="ln-${id}" class="lname" maxlength="80" placeholder="${slot.startsWith("pot-") ? "e.g. DLA" : kind === "in" ? "e.g. Salary" : "e.g. Water"}" value="${esc(l?.name)}" autocomplete="off" required>
     <label class="sr" for="la-${id}">Amount (£)</label>
-    <input type="number" id="la-${id}" class="lamt" inputmode="decimal" min="0" step="0.01" placeholder="£" value="${l ? l.amount : ""}" required>
+    <input type="number" id="la-${id}" class="lamt" inputmode="decimal" min="0" step="0.01" placeholder="£" value="${l ? l.amount : ""}"${isTermly(l || {}) ? " hidden" : " required"}>
     <div class="lfq" role="radiogroup" aria-label="How often">
       <label><input type="radio" name="fq-${id}" value="monthly"${!l || l.frequency === "monthly" ? " checked" : ""}> Monthly</label>
       <label><input type="radio" name="fq-${id}" value="termly"${isTermly(l || {}) ? " checked" : ""}> Termly</label>
@@ -597,9 +606,13 @@ function lineIcon(l) {
   return `<span class="aicon sm ${tone}">${svg(icon)}</span>`;
 }
 const lineRowBtn = (l) => `<button type="button" class="lrow${isOneOff(l) ? " once" : ""}" data-line="${l.id}">${lineIcon(l)}<span class="lname">${esc(l.name)}${l.note
-  ? `<span class="lsub lnotes">${esc(l.note)}</span>` : ""}${spendLine(l)}${fundLine(l)}${datesLine(l)}${planLine(l)}</span>${freqMark(l)}<span class="lamtw"><span class="lamt">${esc(gbp.format(l.amount))}</span>${yearNote(l)}</span></button>`;
+  ? `<span class="lsub lnotes">${esc(l.note)}</span>` : ""}${spendLine(l)}${fundLine(l)}${datesLine(l)}${planLine(l)}</span>${freqMark(l)}<span class="lamtw">${lineAmount(l)}${yearNote(l)}</span></button>`;
+function lineAmount(l) {
+  if (!isTermly(l)) return `<span class="lamt">${esc(gbp.format(l.amount))}</span>`;
+  return termLabel(l) ? `<span class="lamt">${esc(gbp.format(l.amount))}</span>` : `<span class="lamt none">Not this month</span>`;
+}
 function lineList(slot, ls) {
-  const rows = ls.map((l) => budgetEdit === l.id ? `<li>${lineForm(slot, l)}</li>` : `<li>${lineRowBtn(l)}</li>`).join("");
+  const rows = ls.map((l) => budgetEdit === l.id ? `<li>${lineForm(slot, l)}</li>` : `<li>${lineRowBtn(l)}${termTicks(l)}</li>`).join("");
   const label = slot === "in" ? "Money in" : slot === "out" ? "Bill" : "Item";
   return `<ul class="llist">${rows}${budgetEdit === `new-${slot}` ? `<li>${lineForm(slot)}</li>` : ""}</ul>
     ${budgetEdit === `new-${slot}` ? "" : `<button class="btn quiet ladd" type="button" data-line-new="${slot}">+ ${label}</button>`}`;
@@ -944,9 +957,7 @@ $("#list").addEventListener("keydown", (e) => {
 $("#list").addEventListener("input", (e) => {
   const tb = e.target.classList.contains("tamt") && e.target.closest(".lterms");
   if (tb) {
-    const t = readTerms(tb);
-    tb.querySelector(".ltsum").innerHTML = termsSummary(t);
-    if (t.length) tb.closest(".lform").querySelector("input.lamt").value = (Math.round((termsTotal(t) / 12) * 100) / 100).toFixed(2);
+    tb.querySelector(".ltsum").innerHTML = termsSummary(readTerms(tb));
     return;
   }
   const plan = e.target.closest(".lplan");
@@ -965,7 +976,18 @@ $("#list").addEventListener("change", async (e) => {
     return;
   }
   if (e.target.name?.startsWith("fq-")) {
-    e.target.closest(".lform").querySelector(".lterms").hidden = e.target.value !== "termly";
+    const form = e.target.closest(".lform"), termly = e.target.value === "termly", amt = form.querySelector("input.lamt");
+    form.querySelector(".lterms").hidden = !termly;
+    amt.hidden = termly;
+    amt.required = !termly;
+    return;
+  }
+  if (e.target.dataset.termPaid) {
+    const l = lines.find((x) => x.id === e.target.dataset.termPaid);
+    const paidTerms = [...document.querySelectorAll(`[data-term-paid="${l.id}"]:checked`)].map((i) => Number(i.value));
+    Object.assign(l, { paidTerms, amount: paidOf(l.terms, paidTerms) });
+    renderHome();
+    try { await store.updateLine(l.id, { paidTerms, amount: l.amount }); } catch (err) { fail(err); await reload(); }
     return;
   }
   if (e.target.closest(".lplan")) return;
@@ -1090,7 +1112,8 @@ document.addEventListener("click", async (e) => {
     const ids = new Map();
     const copy = monthLines(b.dataset.monthCopy).filter((l) => !isOneOff(l)).map((l, n) => {
       ids.set(l.id, uid());
-      return { ...l, id: ids.get(l.id), month: budgetMonth, position: Date.now() + n };
+      const fresh = isTermly(l) ? { paidTerms: [], amount: 0 } : {};
+      return { ...l, id: ids.get(l.id), month: budgetMonth, position: Date.now() + n, ...fresh };
     });
     for (const l of copy) l.funds = (l.funds || []).filter((f) => ids.has(f.to)).map((f) => ({ ...f, to: ids.get(f.to) }));
     lines.push(...copy);
@@ -1311,12 +1334,14 @@ document.addEventListener("submit", async (e) => {
   if (lf) {
     e.preventDefault();
     const name = lf.querySelector(".lname").value.trim();
-    const amount = toNum(lf.querySelector(".lamt").value);
-    if (!name || amount == null) return;
     const id = lf.dataset.lineForm, slot = lf.dataset.slot;
     const icon = lf.querySelector(`input[name="ic-${id}"]:checked`)?.value || null;
     const frequency = lf.querySelector(`input[name="fq-${id}"]:checked`)?.value || "monthly";
     const terms = frequency === "termly" ? readTerms(lf) : [];
+    if (frequency === "termly" && !terms.length) { toast("Put in what at least one term costs"); lf.querySelector(".tamt")?.focus(); return; }
+    const paidTerms = frequency === "termly" ? (lines.find((l) => l.id === id)?.paidTerms || []).filter((i) => i < terms.length) : [];
+    const amount = frequency === "termly" ? paidOf(terms, paidTerms) : toNum(lf.querySelector(".lamt").value);
+    if (!name || amount == null) return;
     const plan = readPlan(lf);
     const startedOn = lf.querySelector(".lstart").value || plan[0]?.from || null;
     const endsOn = lf.querySelector(".lend").value || plan.at(-1)?.to || null;
@@ -1327,7 +1352,7 @@ document.addEventListener("submit", async (e) => {
     budgetEdit = null;
     try {
       if (existing) {
-        const patch = { name, amount, icon, frequency, startedOn, remind, plan, note, terms };
+        const patch = { name, amount, icon, frequency, startedOn, remind, plan, note, terms, paidTerms };
         if (endsOn !== (existing.endsOn || null)) patch.endsOn = endsOn;
         Object.assign(existing, patch);
         renderHome();
@@ -1336,7 +1361,7 @@ document.addEventListener("submit", async (e) => {
       } else {
         const groupId = slotGroup(slot);
         const l = { id: uid(), householdId: household.id, month: budgetMonth, kind: slotKind(slot), name, amount, position: Date.now(),
-          groupId, icon, frequency, startedOn, endsOn, remind, plan, note, terms };
+          groupId, icon, frequency, startedOn, endsOn, remind, plan, note, terms, paidTerms };
         lines.push(l);
         budgetEdit = `new-${slot}`;
         renderHome();

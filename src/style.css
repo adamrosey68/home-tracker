@@ -357,6 +357,13 @@ ul { list-style: none; margin: 0; padding: 0; }
 .lyr { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; max-width: 8.5em; }
 .lrow .lname { min-width: 30%; }
 .bgyear { margin: 0; font-size: 13px; color: var(--muted); }
+.lamt.none { font-size: 12px; font-weight: 500; color: var(--muted); white-space: nowrap; }
+.ltpaid { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: -4px 0 8px 48px; font-size: 13px; }
+.ltpaid .ltq { color: var(--muted); }
+.ltpaid .tick { gap: 6px; font-size: 13px; }
+.ltpaid b { font-weight: 600; }
+.lform:has(input.lamt[hidden]) .lname { grid-column: 1 / -1; }
+@media (max-width: 400px) { .ltpaid { margin-left: 4px; } }
 .klist { list-style: none; margin: 0; padding: 0 10px 8px; display: grid; }
 .klist > li + li { border-top: 1px solid var(--line); }
 .krow { width: 100%; padding: 8px 2px; border: 0; background: none; color: inherit; text-align: left; display: flex; align-items: center; gap: 12px; font-size: 15px; }
