@@ -252,7 +252,26 @@ ul { list-style: none; margin: 0; padding: 0; }
 .lrow .lsub.soon { color: var(--warn); font-weight: 600; }
 .lrow .lsub.late { color: var(--danger); font-weight: 600; }
 .lbell svg { width: 12px; height: 12px; vertical-align: -1px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.ldates, .lplan { grid-column: 1 / -1; }
+.ldates, .lplan, .lspend { grid-column: 1 / -1; }
+.lspend .hint { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
+.lrow .lsub.spend b { color: var(--fg); font-weight: 600; }
+.lrow .lsub.spend.over b { color: var(--danger); }
+.spbar { display: block; height: 4px; margin-top: 4px; border-radius: 2px; background: var(--line); overflow: hidden; max-width: 260px; }
+.spbar span { display: block; height: 100%; background: var(--accent); }
+.lsub.over .spbar span { background: var(--danger); }
+.sptot { margin: 0 0 6px; padding: 8px 10px; border-radius: 8px; background: var(--bg); font-size: 14px; }
+.sptot.over { background: var(--danger-soft); color: var(--danger); }
+.splist { list-style: none; margin: 0; padding: 0; }
+.sprow { display: flex; align-items: center; gap: 8px; min-height: 38px; font-size: 14px; }
+.sprow + .sprow { border-top: 1px solid var(--line); }
+.spplace { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.spamt { font-variant-numeric: tabular-nums; font-weight: 600; }
+.sprow.pending .spamt { color: var(--muted); }
+.sprow .chip { min-height: 26px; padding: 0 10px; font-size: 12px; background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+.sprow .gbtn { width: 32px; height: 32px; }
+.spadd { display: grid; grid-template-columns: 1fr 90px auto auto; gap: 6px; align-items: center; margin-top: 6px; }
+.spadd .sppend { min-height: 36px; font-size: 13px; gap: 6px; }
+@media (max-width: 420px) { .spadd { grid-template-columns: 1fr 90px; } }
 .lplan .hint { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
 .pstages { display: grid; gap: 8px; }
 .pstage { display: grid; grid-template-columns: 1fr 1fr 90px 36px; gap: 6px; align-items: end; }
@@ -262,7 +281,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 .psum { list-style: none; margin: 8px 0 4px; padding: 8px 10px; border-radius: 8px; background: var(--bg); display: grid; gap: 3px; font-size: 13px; color: var(--muted); }
 .psum .ptot { color: var(--fg); font-size: 14px; margin-top: 2px; }
 .lrow .lsub.plan b { color: var(--fg); font-weight: 600; }
-.ldates summary, .lplan summary { cursor: pointer; font-size: 14px; color: var(--accent); font-weight: 600; min-height: 32px; display: flex; align-items: center; }
+.lspend summary, .ldates summary, .lplan summary { cursor: pointer; font-size: 14px; color: var(--accent); font-weight: 600; min-height: 32px; display: flex; align-items: center; }
 .ldgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 4px 0 8px; }
 .ldgrid label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
 .ldates .tick { font-size: 14px; }

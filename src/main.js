@@ -31,6 +31,7 @@ let vehicleDeleteArmed = false;
 const openVehicleDetails = new Set();
 let lines = [];
 let budgetGroups = [];
+let spends = [];
 let budgetMonth = null;
 /* Which budget line form is open: a line id, "new-in", "new-out" or "new-<groupId>". */
 let budgetEdit = null;
@@ -432,6 +433,63 @@ function readPlan(form) {
     from: r.querySelector(".pfrom").value, to: r.querySelector(".pto").value, amount: toNum(r.querySelector(".pamt").value),
   })).filter((s) => s.from && s.to && s.amount != null && s.to >= s.from).sort((a, b) => a.from.localeCompare(b.from));
 }
+const spendsOf = (l) => spends.filter((s) => s.lineId === l.id).sort((a, b) => a.position - b.position);
+function spendTally(l) {
+  const ss = spendsOf(l);
+  if (!ss.length) return null;
+  const spent = sum(ss), pending = sum(ss.filter((s) => s.pending));
+  return { ss, spent, pending, diff: Math.round((spent - l.amount) * 100) / 100 };
+}
+function spendLine(l) {
+  const t = spendTally(l);
+  if (!t) return "";
+  const pct = l.amount > 0 ? Math.min(100, (t.spent / l.amount) * 100) : 100;
+  return `<span class="lsub spend${t.diff > 0 ? " over" : ""}">${esc(gbp.format(t.spent))} spent of ${esc(gbp.format(l.amount))} · <b>${t.diff > 0
+    ? `${esc(gbp.format(t.diff))} over` : `${esc(gbp.format(-t.diff))} left`}</b>${t.pending ? ` (incl. ${esc(gbp.format(t.pending))} pending)` : ""}
+    <span class="spbar"><span style="width:${pct.toFixed(1)}%"></span></span></span>`;
+}
+function spendBody(l) {
+  const t = spendTally(l);
+  const rows = (t?.ss || []).map((s) => `<li class="sprow${s.pending ? " pending" : ""}">
+      <span class="spplace">${esc(s.place)}</span>
+      ${s.pending ? `<button class="chip" type="button" data-spend-clear="${s.id}" title="Tap when it has gone through">Pending</button>` : ""}
+      <span class="spamt">${esc(gbp.format(s.amount))}</span>
+      <button class="gbtn" type="button" data-spend-del="${s.id}" aria-label="Remove ${esc(s.place)}">×</button>
+    </li>`).join("");
+  const total = t ? `<p class="sptot${t.diff > 0 ? " over" : ""}">Spent <b>${esc(gbp.format(t.spent))}</b> of ${esc(gbp.format(l.amount))} budgeted: <b>${t.diff > 0
+    ? `${esc(gbp.format(t.diff))} over budget` : t.diff < 0 ? `${esc(gbp.format(-t.diff))} under budget` : "exactly on budget"}</b>${t.pending
+    ? `<br>Includes ${esc(gbp.format(t.pending))} still pending` : ""}</p>` : `<p class="hint">Add each shop as you spend, to see if it fits the budget.</p>`;
+  return `${total}<ul class="splist">${rows}</ul>
+    <div class="spadd">
+      <label class="sr" for="sp-place-${l.id}">Where</label>
+      <input type="text" id="sp-place-${l.id}" class="spin-place" maxlength="80" placeholder="Where, e.g. Tesco" autocomplete="off">
+      <label class="sr" for="sp-amt-${l.id}">Amount (£)</label>
+      <input type="number" id="sp-amt-${l.id}" class="spin-amt" inputmode="decimal" min="0" step="0.01" placeholder="£">
+      <label class="tick sppend"><input type="checkbox" id="sp-pend-${l.id}" class="spin-pend"> Pending</label>
+      <button class="btn" type="button" data-spend-add="${l.id}">Add</button>
+    </div>`;
+}
+function spendPicker(l) {
+  if (!l || l.kind !== "out") return "";
+  return `<details class="lspend"${spendsOf(l).length ? " open" : ""}>
+    <summary>What we've spent</summary>
+    <div class="spbody">${spendBody(l)}</div>
+  </details>`;
+}
+function refreshSpends(lineId) {
+  const box = $(`[data-line-form="${lineId}"] .spbody`), l = lines.find((x) => x.id === lineId);
+  if (box && l) box.innerHTML = spendBody(l);
+}
+async function addSpend(lineId) {
+  const box = $(`[data-line-form="${lineId}"] .spadd`);
+  const place = box.querySelector(".spin-place").value.trim(), amount = toNum(box.querySelector(".spin-amt").value);
+  if (!place || amount == null) { box.querySelector(place ? ".spin-amt" : ".spin-place").focus(); return; }
+  const s = { id: uid(), householdId: household.id, lineId, place, amount, pending: box.querySelector(".spin-pend").checked, position: Date.now() };
+  spends.push(s);
+  refreshSpends(lineId);
+  $(`#sp-place-${lineId}`)?.focus();
+  try { await store.addSpend(s); } catch (err) { fail(err); await reload(); }
+}
 function lineForm(slot, l) {
   const kind = slotKind(slot);
   const id = l ? l.id : `new-${slot}`;
@@ -444,6 +502,7 @@ function lineForm(slot, l) {
       <label><input type="radio" name="fq-${id}" value="monthly"${isOneOff(l || {}) ? "" : " checked"}> Monthly</label>
       <label><input type="radio" name="fq-${id}" value="one-off"${isOneOff(l || {}) ? " checked" : ""}> One-off</label>
     </div>
+    ${spendPicker(l)}
     ${datesPicker(id, l)}
     ${planPicker(l)}
     ${iconPicker(id, l, kind)}
@@ -460,7 +519,7 @@ function lineIcon(l) {
 }
 function lineList(slot, ls) {
   const rows = ls.map((l) => budgetEdit === l.id ? `<li>${lineForm(slot, l)}</li>`
-    : `<li><button type="button" class="lrow${isOneOff(l) ? " once" : ""}" data-line="${l.id}">${lineIcon(l)}<span class="lname">${esc(l.name)}${datesLine(l)}${planLine(l)}</span>${freqMark(l)}<span class="lamt">${esc(gbp.format(l.amount))}</span></button></li>`).join("");
+    : `<li><button type="button" class="lrow${isOneOff(l) ? " once" : ""}" data-line="${l.id}">${lineIcon(l)}<span class="lname">${esc(l.name)}${spendLine(l)}${datesLine(l)}${planLine(l)}</span>${freqMark(l)}<span class="lamt">${esc(gbp.format(l.amount))}</span></button></li>`).join("");
   const label = slot === "in" ? "Money in" : slot === "out" ? "Bill" : "Item";
   return `<ul class="llist">${rows}${budgetEdit === `new-${slot}` ? `<li>${lineForm(slot)}</li>` : ""}</ul>
     ${budgetEdit === `new-${slot}` ? "" : `<button class="btn quiet ladd" type="button" data-line-new="${slot}">+ ${label}</button>`}`;
@@ -610,6 +669,12 @@ function renderHome() {
 }
 
 $("#search").addEventListener("input", (e) => { filter.q = e.target.value; renderHome(); });
+$("#list").addEventListener("keydown", (e) => {
+  const add = e.key === "Enter" && e.target.closest(".spadd");
+  if (!add) return;
+  e.preventDefault();
+  addSpend(add.querySelector("[data-spend-add]").dataset.spendAdd);
+});
 $("#list").addEventListener("input", (e) => {
   const plan = e.target.closest(".lplan");
   if (plan) plan.querySelector(".psumwrap").innerHTML = planSummary(readPlan(plan));
@@ -657,6 +722,23 @@ document.addEventListener("click", async (e) => {
     const from = last ? addMonths(last.to, 1) : b.closest("form").querySelector(".lstart").value || todayIso();
     box.querySelector(".pstages").insertAdjacentHTML("beforeend", planStage({ from }));
     box.querySelector(".pstage:last-child .pto").focus();
+    return;
+  }
+  if ((b = t("[data-spend-add]"))) return addSpend(b.dataset.spendAdd);
+  if ((b = t("[data-spend-del]")) || (b = t("[data-spend-clear]"))) {
+    const s = spends.find((x) => x.id === (b.dataset.spendDel || b.dataset.spendClear));
+    if (!s) return;
+    if (b.dataset.spendDel) spends = spends.filter((x) => x !== s); else s.pending = false;
+    refreshSpends(s.lineId);
+    try {
+      if (b.dataset.spendDel) {
+        await store.deleteSpend(s.id);
+        toast(`Removed ${s.place}`, { label: "Undo", run: async () => {
+          spends.push(s); refreshSpends(s.lineId);
+          try { await store.addSpend(s); } catch (err) { fail(err); await reload(); }
+        } });
+      } else await store.updateSpend(s.id, { pending: false });
+    } catch (err) { fail(err); await reload(); }
     return;
   }
   if ((b = t("[data-plan-remove]"))) {
@@ -1363,6 +1445,9 @@ $("#exportBackup").onclick = async () => {
         l.startedOn ? prettyDate(l.startedOn) : "", l.endsOn ? prettyDate(l.endsOn) : ""]));
     X.utils.book_append_sheet(wb, sheet([["Month", "In or out", "Group", "What", "Amount (£)", "How often", "In the totals", "Started", "Expires"], ...budget],
       [16, 11, 22, 24, 11, 11, 12, 13, 13]), "Budget lines");
+    const spent = [...lines].sort((a, b) => a.month.localeCompare(b.month) || a.position - b.position)
+      .flatMap((l) => spendsOf(l).map((s) => [monthLabel(l.month), l.name, s.place, s.amount, s.pending ? "Yes" : ""]));
+    if (spent.length) X.utils.book_append_sheet(wb, sheet([["Month", "Budget", "Where", "Amount (£)", "Pending"], ...spent], [16, 22, 24, 11, 9]), "Spending");
 
     const vrows = vehicles.flatMap((v) => [
       ...[["Registration", v.registration], ["Make", v.make], ["Model", v.model], ["Nickname", v.nickname]].filter(([, x]) => x),
@@ -1477,9 +1562,16 @@ $("#authForm").addEventListener("submit", async (e) => {
 
 async function reload() {
   household = await store.household();
-  ({ items, groups, vehicles, lines, budgetGroups } = await store.load(household.id));
+  ({ items, groups, vehicles, lines, budgetGroups, spends } = await store.load(household.id));
   budgetMonth ??= todayIso().slice(0, 8) + "01";
-  if (!$("#home").hidden) renderHome();
+  if (!$("#home").hidden) {
+    /* Syncing redraws the list, so keep anything half-typed in a spending row and where the cursor was. */
+    const typed = [...document.querySelectorAll(".spadd input")].map((i) => [i.id, i.type === "checkbox" ? i.checked : i.value]);
+    const focused = document.activeElement?.id;
+    renderHome();
+    for (const [id, v] of typed) { const i = document.getElementById(id); if (i) i[i.type === "checkbox" ? "checked" : "value"] = v; }
+    if (focused) document.getElementById(focused)?.focus();
+  }
   if (editing && !$("#itemSheet").hidden) { if (sheetItem()) renderDocs(); else closeItem(); }
 }
 
