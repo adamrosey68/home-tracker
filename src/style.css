@@ -357,6 +357,21 @@ ul { list-style: none; margin: 0; padding: 0; }
 .lyr { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; max-width: 8.5em; }
 .lrow .lname { min-width: 30%; }
 .bgyear { margin: 0; font-size: 13px; color: var(--muted); }
+.klist { list-style: none; margin: 0; padding: 0 10px 8px; display: grid; }
+.klist > li + li { border-top: 1px solid var(--line); }
+.krow { width: 100%; padding: 8px 2px; border: 0; background: none; color: inherit; text-align: left; display: flex; align-items: center; gap: 12px; font-size: 15px; }
+.kimg { width: 56px; height: 56px; flex: none; border-radius: 10px; object-fit: cover; background: var(--bg); display: grid; place-items: center; color: var(--muted); }
+.kimg svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.kimg.big { width: 100%; max-width: 280px; height: auto; aspect-ratio: 4 / 3; }
+.kimg.big.none svg { width: 44px; height: 44px; }
+.kmain { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.ktitle { font-weight: 600; overflow-wrap: anywhere; }
+.kwho { display: flex; flex-wrap: wrap; gap: 4px; }
+.kperson { font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); }
+.knobody, .ksub { font-size: 12px; color: var(--muted); }
+.kform { display: grid; gap: 8px; padding: 10px; }
+.kphoto { display: grid; gap: 8px; justify-items: start; }
+.kpick { display: flex; flex-wrap: wrap; gap: 6px; }
 .bgsub { margin: 6px 0 0; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
 .lrow .lsub.fund { color: var(--ok); }
 .lrow .lsub.fund b { font-weight: 600; }

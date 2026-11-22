@@ -35,6 +35,10 @@ let spends = [];
 let accounts = [], moves = [];
 let savEdit = null, savDeleteArmed = false, moveEdit = null;
 const savShowAll = new Set();
+let keys = [];
+/* Which key form is open (a key id or "new"), and a photo taken in it that isn't saved yet: { blob, url }. */
+let keyEdit = null, keyDeleteArmed = false, keyPhoto = null;
+const photoUrls = new Map();
 let budgetMonth = null;
 /* Which budget line form is open: a line id, "new-in", "new-out" or "new-<groupId>". */
 let budgetEdit = null;
@@ -786,6 +790,70 @@ function savingsSection(a) {
   </section>`;
 }
 
+/* ---------- Keys ---------- */
+
+const KEY_ICON = '<circle cx="7.5" cy="15.5" r="4.5"></circle><path d="m10.7 12.3 9.8-9.8M17 6l3 3M14.5 8.5l2.5 2.5"></path>';
+const holderNames = () => [...new Set(keys.flatMap((k) => k.holders))].sort((a, b) => a.localeCompare(b));
+const splitNames = (s) => [...new Set(s.split(/[,\n]/).map((x) => x.trim()).filter(Boolean))].slice(0, 20);
+const keyMatches = (k) => !q() || [k.name, k.note, ...k.holders].some((x) => x?.toLowerCase().includes(q().toLowerCase()));
+function keyImg(path, alt, big) {
+  const cls = `kimg${big ? " big" : ""}`;
+  if (!path) return `<span class="${cls} none">${svg(KEY_ICON)}</span>`;
+  return `<img class="${cls}" alt="${esc(alt)}" data-key-src="${esc(path)}" src="${esc(photoUrls.get(path) || "")}">`;
+}
+function keyPhotoBox(k) {
+  const img = keyPhoto ? `<img class="kimg big" alt="" src="${keyPhoto.url}">` : keyImg(k?.photo, k ? `Photo of ${k.name}` : "", true);
+  return `${img}<button class="btn" type="button" data-key-snap>${keyPhoto || k?.photo ? "Change photo" : "Take or choose a photo"}</button>`;
+}
+function keyForm(k) {
+  const id = k ? k.id : "new", used = holderNames();
+  return `<form class="kform" data-key-form="${id}">
+    <div class="kphoto">${keyPhotoBox(k)}</div>
+    <label class="sr" for="kn-${id}">Key name</label>
+    <input type="text" id="kn-${id}" class="kname" maxlength="60" placeholder="Name, e.g. Front door" value="${esc(k?.name)}" autocomplete="off" required>
+    <label class="sr" for="kh-${id}">Who's got it</label>
+    <input type="text" id="kh-${id}" class="kholders" maxlength="400" placeholder="Who's got it, e.g. Adam, Vikki, Nan" value="${esc(k?.holders.join(", "))}" autocomplete="off">
+    ${used.length ? `<div class="kpick">${used.map((n) => `<button class="chip" type="button" data-key-who="${esc(n)}">+ ${esc(n)}</button>`).join("")}</div>` : ""}
+    <label class="sr" for="kt-${id}">Note</label>
+    <input type="text" id="kt-${id}" class="knote" maxlength="200" placeholder="Note, e.g. blue cover, opens the back gate" value="${esc(k?.note)}" autocomplete="off">
+    <div class="row">
+      <button class="btn primary" type="submit">${k ? "Save" : "Add key"}</button>
+      ${k ? `<button class="btn danger${keyDeleteArmed ? " confirm" : ""}" type="button" data-key-delete="${k.id}">${keyDeleteArmed ? "Tap again to delete" : "Delete"}</button>` : ""}
+      <button class="btn quiet" type="button" data-key-cancel>Cancel</button>
+    </div>
+  </form>`;
+}
+function keysCard() {
+  const shown = keys.filter(keyMatches);
+  if (q() && !shown.length) return "";
+  const rows = shown.map((k) => keyEdit === k.id ? `<li>${keyForm(k)}</li>` : `<li><button type="button" class="krow" data-key="${k.id}">
+      ${keyImg(k.photo, `Photo of ${k.name}`)}
+      <span class="kmain"><span class="ktitle">${esc(k.name)}</span>
+        <span class="kwho">${k.holders.length ? k.holders.map((n) => `<span class="kperson">${esc(n)}</span>`).join("") : `<span class="knobody">Nobody listed</span>`}</span>
+        ${k.note ? `<span class="ksub">${esc(k.note)}</span>` : ""}</span>
+    </button></li>`).join("");
+  return `<section class="pcard keys">
+    <div class="phdr"><span class="pname">Keys${keys.length ? ` <span class="cnt">${keys.length}</span>` : ""}</span>
+      <button class="btn quiet addin" type="button" data-key-new>+ Key</button></div>
+    ${keyEdit === "new" ? keyForm(null) : ""}
+    ${rows ? `<ul class="klist">${rows}</ul>` : keyEdit === "new" ? "" : `<p class="empty">Add each key with a photo, its name and who has a copy.</p>`}
+  </section>`;
+}
+async function fillKeyPhotos() {
+  const imgs = [...document.querySelectorAll("img[data-key-src]")].filter((i) => !i.getAttribute("src"));
+  if (!imgs.length) return;
+  try {
+    const urls = await store.docUrls([...new Set(imgs.map((i) => i.dataset.keySrc))]);
+    for (const [p, u] of Object.entries(urls)) if (u) photoUrls.set(p, u);
+    for (const i of imgs) i.src = urls[i.dataset.keySrc] || "";
+  } catch (e) { console.warn(e); }
+}
+function closeKey() {
+  keyEdit = null;
+  keyDeleteArmed = false;
+  keyPhoto = null;
+}
+
 function areaSection(a) {
   if (a.id === "savings") return savingsSection(a);
   const all = groups.filter((g) => g.area === a.id);
@@ -799,9 +867,10 @@ function areaSection(a) {
   const gs = all.filter((g) => !vehicleById(g.vehicleId) && groupMatches(g));
   const loose = items.filter((i) => !i.groupId && !i.archivedAt && areaIdOf(i) === a.id && (!q() || textMatch(i))).sort(sortItems);
   const adding = newGroupArea === a.id;
-  if (q() && !gs.length && !loose.length && !vBlocks) return "";
-  const shut = closedAreas.has(a.id) && !q() && !adding;
-  const n = all.length + vs.length + (loose.length ? 1 : 0);
+  const hasKeys = a.id === "home" && keys.some(keyMatches);
+  if (q() && !gs.length && !loose.length && !vBlocks && !hasKeys) return "";
+  const shut = closedAreas.has(a.id) && !q() && !adding && !(a.id === "home" && keyEdit);
+  const n = all.length + vs.length + (loose.length ? 1 : 0) + (a.id === "home" && keys.length ? 1 : 0);
   return `<section class="area">
     <div class="ahead">
       <button class="atoggle" type="button" data-area-toggle="${a.id}" aria-expanded="${!shut}">
@@ -828,11 +897,12 @@ function areaBody(a, adding, vBlocks, gs, loose) {
     ${vBlocks}
     <div class="glist">
       ${gs.map(groupCard).join("")}
+      ${a.id === "home" ? keysCard() : ""}
       ${loose.length ? `<section class="pcard">
         <div class="phdr"><span class="pname">${gs.length ? "Not in a group" : "Items"}</span>
           <button class="btn quiet addin" type="button" data-add="${a.id}">+ Add</button></div>
         <ul class="irows">${loose.map(itemRow).join("")}</ul></section>` : ""}
-      ${!gs.length && !loose.length && !adding && !vBlocks && a.id !== "bills" ? `<p class="empty">No groups yet. Tap “+ Group” to start one.</p>` : ""}
+      ${!gs.length && !loose.length && !adding && !vBlocks && a.id !== "bills" && a.id !== "home" ? `<p class="empty">No groups yet. Tap “+ Group” to start one.</p>` : ""}
     </div>`;
 }
 
@@ -842,12 +912,12 @@ function renderHome() {
   renderTotals();
   renderComing();
   const count = (id) => groups.filter((g) => g.area === id).length + items.filter((i) => !i.groupId && !i.archivedAt && areaIdOf(i) === id).length
-    + (id === "car" ? vehicles.length : 0) + (id === "bills" && monthLines(budgetMonth).length ? 1 : 0) + (id === "savings" ? accounts.length : 0);
+    + (id === "car" ? vehicles.length : 0) + (id === "bills" && monthLines(budgetMonth).length ? 1 : 0) + (id === "savings" ? accounts.length : 0) + (id === "home" ? keys.length : 0);
   $("#areaChips").innerHTML = [{ id: "all", label: "All" }, ...AREAS].map((a) => {
     const n = a.id === "all" ? AREAS.reduce((s, x) => s + count(x.id), 0) : count(a.id);
     return `<button type="button" class="chip" data-area="${a.id}" aria-pressed="${filter.area === a.id}">${esc(a.label)} <span class="cnt">${n}</span></button>`;
   }).join("");
-  const anything = items.length || groups.length || vehicles.length || lines.length || accounts.length || newGroupArea || savEdit;
+  const anything = items.length || groups.length || vehicles.length || lines.length || accounts.length || keys.length || newGroupArea || savEdit || keyEdit;
   $(".filters").hidden = !anything;
   $("#list").innerHTML = anything
     ? AREAS.filter((a) => filter.area === "all" || filter.area === a.id).map(areaSection).join("") || `<p class="empty">Nothing matches that search.</p>`
@@ -859,6 +929,7 @@ function renderHome() {
   if (showArchive) $("#archiveList").innerHTML = `<section class="pcard"><ul class="irows">${arch.sort(sortItems).map(itemRow).join("")}</ul></section>`;
   const input = $("#groupName");
   if (input && document.activeElement !== input) input.focus();
+  fillKeyPhotos();
 }
 
 $("#search").addEventListener("input", (e) => { filter.q = e.target.value; renderHome(); });
@@ -1027,6 +1098,25 @@ document.addEventListener("click", async (e) => {
     try { await store.addLines(copy); toast(`Copied ${copy.length} lines into ${monthLabel(budgetMonth)}`); } catch (err) { fail(err); await reload(); }
     return;
   }
+  if (t("[data-key-new]")) { closeKey(); keyEdit = "new"; closedAreas.delete("home"); renderHome(); return $(".kform .kname")?.focus(); }
+  if ((b = t("[data-key]"))) { closeKey(); keyEdit = b.dataset.key; return renderHome(); }
+  if (t("[data-key-cancel]")) { closeKey(); return renderHome(); }
+  if (t("[data-key-snap]")) return $("#keyFile").click();
+  if ((b = t("[data-key-who]"))) {
+    const input = b.closest(".kform").querySelector(".kholders"), names = splitNames(input.value);
+    if (!names.includes(b.dataset.keyWho)) names.push(b.dataset.keyWho);
+    input.value = names.join(", ");
+    return;
+  }
+  if ((b = t("[data-key-delete]"))) {
+    if (!keyDeleteArmed) { keyDeleteArmed = true; return renderHome(); }
+    const k = keys.find((x) => x.id === b.dataset.keyDelete);
+    keys = keys.filter((x) => x !== k);
+    closeKey();
+    renderHome();
+    try { await store.deleteKey(k); toast(`Deleted ${k.name}`); } catch (err) { fail(err); await reload(); }
+    return;
+  }
   if ((b = t("[data-fund-add]"))) {
     const p = lines.find((l) => l.id === b.dataset.fundAdd), box = b.closest(".fdadd");
     const to = box.querySelector(".fd-to").value, amount = toNum(box.querySelector(".fd-amt").value);
@@ -1184,6 +1274,37 @@ document.addEventListener("submit", async (e) => {
         await store.addMove(m);
       }
     } catch (err) { fail(err); await reload(); }
+    return;
+  }
+  const kf = e.target.closest("[data-key-form]");
+  if (kf) {
+    e.preventDefault();
+    const name = kf.querySelector(".kname").value.trim();
+    if (!name) return;
+    const holders = splitNames(kf.querySelector(".kholders").value), note = kf.querySelector(".knote").value.trim() || null;
+    const existing = keys.find((k) => k.id === kf.dataset.keyForm);
+    const k = existing || { id: uid(), householdId: household.id, position: Date.now(), photo: null };
+    const shot = keyPhoto, btn = kf.querySelector("[type=submit]");
+    btn.disabled = true;
+    btn.textContent = shot ? "Uploading photo…" : "Saving…";
+    try {
+      const old = shot ? k.photo : null;
+      const photo = shot ? await store.uploadKeyPhoto(k, shot.blob) : k.photo;
+      if (shot) photoUrls.set(photo, shot.url);
+      const patch = { name, holders, note, photo };
+      if (existing) await store.updateKey(k.id, patch);
+      else await store.addKey({ ...k, ...patch });
+      Object.assign(k, patch);
+      if (!keys.some((x) => x.id === k.id)) keys.push(k);
+      if (old) store.removePhoto(old).catch(console.warn);
+      closeKey();
+      renderHome();
+      toast(existing ? `Saved ${name}` : `Added ${name}`);
+    } catch (err) {
+      fail(err);
+      btn.disabled = false;
+      btn.textContent = existing ? "Save" : "Add key";
+    }
     return;
   }
   const lf = e.target.closest("[data-line-form]");
@@ -1632,11 +1753,11 @@ async function renderDocs() {
   }
 }
 
-function shrinkImage(file) {
+function shrinkImage(file, max = 2000) {
   return new Promise((res, rej) => {
     const img = new Image();
     img.onload = () => {
-      const max = 2000, k = Math.min(1, max / Math.max(img.width, img.height));
+      const k = Math.min(1, max / Math.max(img.width, img.height));
       const c = document.createElement("canvas");
       c.width = Math.round(img.width * k);
       c.height = Math.round(img.height * k);
@@ -1670,6 +1791,20 @@ $("#docFile").addEventListener("change", async (e) => {
     renderDocs();
   }
   renderHome();
+});
+
+$("#keyFile").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  e.target.value = "";
+  const box = $(".kform .kphoto");
+  if (!f || !box) return;
+  try {
+    if (!f.type.startsWith("image/")) throw new Error(`${f.name} isn't a photo.`);
+    const blob = await shrinkImage(f, 1400);
+    keyPhoto = { blob, url: URL.createObjectURL(blob) };
+    const form = box.closest("[data-key-form]");
+    box.innerHTML = keyPhotoBox(keys.find((k) => k.id === form.dataset.keyForm));
+  } catch (err) { fail(err); }
 });
 
 let viewing = null;
@@ -1827,6 +1962,7 @@ $("#exportBackup").onclick = async () => {
     const saved = accounts.flatMap((acc) => { let run = 0; return movesOf(acc).map((m) => [acc.name, uk(m.on), m.kind === "in" ? "Paid in" : "Taken out",
       m.what || "", signed(m), (run = Math.round((run + signed(m)) * 100) / 100)]); });
     if (saved.length) X.utils.book_append_sheet(wb, sheet([["Account", "Date", "In or out", "What for", "Amount (£)", "Balance (£)"], ...saved], [22, 12, 11, 30, 11, 12]), "Savings");
+    if (keys.length) X.utils.book_append_sheet(wb, sheet([["Key", "Who's got it", "Note"], ...keys.map((k) => [k.name, k.holders.join(", "), k.note || ""])], [24, 40, 40]), "Keys");
 
     const vrows = vehicles.flatMap((v) => [
       ...[["Registration", v.registration], ["Make", v.make], ["Model", v.model], ["Nickname", v.nickname]].filter(([, x]) => x),
@@ -1941,11 +2077,11 @@ $("#authForm").addEventListener("submit", async (e) => {
 
 async function reload() {
   household = await store.household();
-  ({ items, groups, vehicles, lines, budgetGroups, spends, accounts, moves } = await store.load(household.id));
+  ({ items, groups, vehicles, lines, budgetGroups, spends, accounts, moves, keys } = await store.load(household.id));
   budgetMonth ??= todayIso().slice(0, 8) + "01";
   if (!$("#home").hidden) {
     /* Syncing redraws the list, so keep anything half-typed in a spending row and where the cursor was. */
-    const typed = [...document.querySelectorAll(".spadd input, .fdadd select, .fdadd input")].map((i) => [i.id, i.type === "checkbox" ? i.checked : i.value]);
+    const typed = [...document.querySelectorAll(".spadd input, .fdadd select, .fdadd input, .kform input[type=text]")].map((i) => [i.id, i.type === "checkbox" ? i.checked : i.value]);
     const focused = document.activeElement?.id;
     renderHome();
     for (const [id, v] of typed) { const i = document.getElementById(id); if (i) i[i.type === "checkbox" ? "checked" : "value"] = v; }
