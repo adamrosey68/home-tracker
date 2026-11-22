@@ -413,7 +413,7 @@ function budgetCard() {
     </div>
     ${skipped.length ? `<p class="bskip">Not in these totals: ${skipped.map((g) => `${esc(g.name)} ${esc(gbp.format(sum(inGroup(g))))}`).join(" · ")}</p>` : ""}
     <div class="bsect"><div class="bghead"><h3>Coming in <span class="cnt">${ins.length}</span></h3><span class="bgsum in">${esc(gbp.format(tin))}</span></div>${lineList("in", ins)}</div>
-    <div class="bsect"><div class="bghead"><h3>Going out <span class="cnt">${outs.length}</span></h3><span class="bgsum">${esc(gbp.format(sum(outs)))}</span></div>${lineList("out", outs)}</div>
+    ${outs.length || !budgetGroups.length || budgetEdit === "new-out" ? `<div class="bsect"><div class="bghead"><h3>Going out <span class="cnt">${outs.length}</span></h3><span class="bgsum">${esc(gbp.format(sum(outs)))}</span></div>${lineList("out", outs)}</div>` : ""}
     ${budgetGroups.map((g) => bgroupSect(g, inGroup(g))).join("")}
     <div class="bsect bgnew">${bgroupEdit === "new" ? bgroupForm(null)
       : `<button class="btn quiet ladd" type="button" data-bgroup-new>+ New group of outgoings</button>`}</div>`}
