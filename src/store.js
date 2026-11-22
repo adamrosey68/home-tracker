@@ -100,6 +100,7 @@ function cloud() {
     async renameHousehold(id, name) { ok(await sb.from("households").update({ name }).eq("id", id)); },
     async shareCode(id) { return ok(await sb.rpc("create_share_code", { hid: id })); },
     async join(code) { return ok(await sb.rpc("join_household", { code })); },
+    async people(hid) { return ok(await sb.rpc("household_people", { hid })); },
 
     async load(householdId) {
       const [its, docs, gs, vs, ls, bgs, sps] = await Promise.all([
@@ -209,6 +210,7 @@ function local() {
     async renameHousehold(_id, name) { edit((d) => { d.name = name; }); },
     async shareCode() { throw new Error("Sharing needs the online version."); },
     async join() { throw new Error("Sharing needs the online version."); },
+    async people() { return []; },
     async load() {
       const d = read();
       const items = d.items.map((it) => ({ ...it, docs: d.docs.filter((x) => x.itemId === it.id).map(({ itemId, ...x }) => x) }));

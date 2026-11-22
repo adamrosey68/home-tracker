@@ -29,6 +29,7 @@
       </div>
     </header>
     <form class="panel" id="authForm">
+      <p class="note invite" id="authInvite" hidden>You've been invited to share a Home Tracker. Create an account with your email and a password, and you'll be asked to join. Already have an account? Just sign in.</p>
       <div class="field">
         <label for="authEmail">Email</label>
         <input type="email" id="authEmail" autocomplete="email" required>
@@ -120,10 +121,28 @@
         <p class="note" id="hhMembers"></p>
       </section>
       <section class="sect" id="shareSect">
-        <h3>Share with someone</h3>
-        <p class="note">Give them this code. Once they've joined, you both see and edit the same list.</p>
-        <div class="sharebox" id="sharebox" hidden><p class="code" id="shareCode"></p></div>
-        <div class="row"><button class="btn primary" id="shareMake" type="button">Show share code</button></div>
+        <h3>Share the app</h3>
+        <p class="note">Invite someone, like Vikki, to share everything: renewals, bills and the budget, the car, documents and your holidays. You'll both see the same things and can both add and change them, and changes show up straight away on each other's phones.</p>
+        <ul class="people" id="people"></ul>
+        <div class="row">
+          <button class="btn primary" id="inviteSend" type="button">Invite someone</button>
+          <button class="btn" id="shareMake" type="button">Show share code</button>
+        </div>
+        <div class="sharebox" id="sharebox" hidden>
+          <p class="note">Their invite link:</p>
+          <p class="invlink" id="inviteLink"></p>
+          <p class="note">Or they can type this code under "Join someone else's household":</p>
+          <p class="code" id="shareCode"></p>
+        </div>
+        <details class="howto">
+          <summary>How it works</summary>
+          <ol>
+            <li>Tap <b>Invite someone</b> and send the link by text or WhatsApp.</li>
+            <li>They open it, tap <b>New here? Create an account</b> and sign up with their own email and password.</li>
+            <li>They'll be asked to join your home. Once they say yes, they see everything you do.</li>
+            <li>On an iPhone they can then add it to the home screen: Share button, then <b>Add to Home Screen</b>.</li>
+          </ol>
+        </details>
         <h3>Join someone else's household</h3>
         <form class="inline-form" id="joinForm">
           <label class="sr" for="joinCode">Share code</label>
@@ -152,6 +171,18 @@
         <div class="row">
           <button class="btn" data-nav="import" type="button">Import from Google Sheets</button>
         </div>
+      </section>
+      <section class="sect about">
+        <h3>About this app</h3>
+        <p class="note"><b>Home Tracker</b> keeps everything for the house in one place, so nothing renews or runs out without you knowing.</p>
+        <ul class="note">
+          <li><b>Renewals:</b> insurance, broadband, energy and anything else, with who you're with, what it costs, past providers and reminders before it's due.</li>
+          <li><b>Car:</b> MOT, service, tax, insurance history and the finance agreement.</li>
+          <li><b>Monthly budget:</b> money in and out, your own groups, monthly or one-off items, spending against a budget (like Food), payment plans and expiry reminders.</li>
+          <li><b>Documents:</b> photos and PDFs of policies and receipts, kept privately.</li>
+        </ul>
+        <p class="note">It's private: only people you invite can see your home. It works on your phone and laptop and everything syncs as you go. Holiday Tracker uses the same account and sharing.</p>
+        <p class="note">Version 1.5 · <a href="https://home-tracker-ahg.pages.dev" target="_blank" rel="noopener">home-tracker-ahg.pages.dev</a> · <a href="https://cruise-tracker-8q2.pages.dev" target="_blank" rel="noopener">Holiday Tracker</a></p>
       </section>
     </main>
   </div>

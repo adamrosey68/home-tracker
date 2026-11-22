@@ -113,7 +113,16 @@ select { appearance: none; -webkit-appearance: none; background-image: linear-gr
 .dhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .steps { margin: 0; padding-left: 20px; font-size: 14px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; }
 .steps strong { color: var(--fg); font-weight: 600; }
-.sharebox { background: var(--accent-soft); border-radius: 12px; padding: 12px 14px; }
+.sharebox { background: var(--accent-soft); border-radius: 12px; padding: 12px 14px; display: grid; gap: 4px; }
+.invlink { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--accent); overflow-wrap: anywhere; user-select: all; }
+.people { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.people:empty { display: none; }
+.people li { display: flex; align-items: center; gap: 10px; font-size: 15px; }
+.people .cnt { color: var(--muted); font-size: 13px; }
+.howto summary { cursor: pointer; font-size: 14px; color: var(--accent); font-weight: 600; min-height: 32px; display: flex; align-items: center; }
+.howto ol, .about ul { margin: 4px 0 0; padding-left: 20px; display: grid; gap: 4px; font-size: 14px; color: var(--muted); }
+.about a { color: var(--accent); }
+.note.invite { padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); color: var(--fg); font-size: 14px; }
 .sharebox .code { font-family: var(--font-display); font-size: 30px; font-weight: 700; letter-spacing: 0.18em; color: var(--accent); margin: 0; user-select: all; }
 
 /* Area icons and colours */

@@ -1381,7 +1381,17 @@ function renderSettings() {
   $("#acctEmail").textContent = session?.user?.email ? `Signed in as ${session.user.email}` : "";
   $("#hhName").value = household?.name || "";
   $("#hhMembers").textContent = household?.members > 1 ? `Shared between ${household.members} people.` : "Only you can see this at the moment.";
-  if (household?.shareCode) { $("#shareCode").textContent = household.shareCode; $("#sharebox").hidden = false; }
+  if (household?.shareCode) {
+    $("#shareCode").textContent = household.shareCode;
+    $("#inviteLink").textContent = inviteUrl();
+    $("#sharebox").hidden = false;
+  }
+  if (!store.demo && household) {
+    store.people(household.id).then((ps) => {
+      $("#people").innerHTML = ps.map((p) => `<li><span class="aicon sm plain">${esc((p.email || "?")[0].toUpperCase())}</span>
+        <span>${esc(p.email)}${p.is_me ? " <span class=\"cnt\">(you)</span>" : ""}<br><span class="note">Joined ${prettyDate(p.joined_at.slice(0, 10))}</span></span></li>`).join("");
+    }).catch(console.warn);
+  }
   const p = push.status(store.demo);
   $("#pushStatus").textContent = p.text;
   $("#pushOn").hidden = p.state !== "ask";
@@ -1394,10 +1404,24 @@ $("#hhForm").addEventListener("submit", async (e) => {
   if (!name) return;
   try { await store.renameHousehold(household.id, name); household.name = name; toast("Renamed"); } catch (err) { fail(err); }
 });
+const inviteUrl = () => `${location.origin}/?join=${household.shareCode}`;
 $("#shareMake").onclick = async () => {
   try {
     household.shareCode = await store.shareCode(household.id);
     renderSettings();
+  } catch (err) { fail(err); }
+};
+$("#inviteSend").onclick = async () => {
+  try {
+    household.shareCode ||= await store.shareCode(household.id);
+    renderSettings();
+    const text = `Join our Home Tracker so we can both see and update the house stuff, bills and budget. Open the link, tap "New here? Create an account", then say yes to joining. Code if asked: ${household.shareCode}`;
+    if (navigator.share) {
+      try { await navigator.share({ title: "Join our Home Tracker", text, url: inviteUrl() }); } catch (err) { if (err.name !== "AbortError") throw err; }
+    } else {
+      await navigator.clipboard.writeText(`${text}\n${inviteUrl()}`);
+      toast("Invite copied. Paste it into a text or WhatsApp");
+    }
   } catch (err) { fail(err); }
 };
 $("#joinForm").addEventListener("submit", async (e) => {
@@ -1578,10 +1602,34 @@ async function reload() {
   if (editing && !$("#itemSheet").hidden) { if (sheetItem()) renderDocs(); else closeItem(); }
 }
 
+/* An invite link (?join=CODE) is kept until they've signed in, which may be after confirming their email. */
+const JOIN_KEY = "home-tracker-join";
+{
+  const code = new URLSearchParams(location.search).get("join");
+  if (code) { localStorage.setItem(JOIN_KEY, code.trim().toUpperCase()); history.replaceState(null, "", location.pathname); }
+}
+function inviteWelcome() {
+  if (!localStorage.getItem(JOIN_KEY)) return;
+  $("#authInvite").hidden = false;
+  if (!signingUp) $("#authToggle").click();
+}
+async function acceptInvite() {
+  const code = localStorage.getItem(JOIN_KEY);
+  if (!code) return;
+  localStorage.removeItem(JOIN_KEY);
+  if (household.shareCode === code) return;
+  if (!confirm("You've been invited to share a Home Tracker. Join it now? You'll both see and edit the same renewals, bills, budget and holidays.")) return;
+  try {
+    await store.join(code);
+    await reload();
+    toast(`You've joined ${household.name}`);
+  } catch (err) { fail(err); }
+}
+
 let syncTimer = null;
 async function start(s) {
   session = s;
-  if (!s) { show("auth"); return; }
+  if (!s) { show("auth"); inviteWelcome(); return; }
   try {
     await reload();
   } catch (err) {
@@ -1589,6 +1637,7 @@ async function start(s) {
     return;
   }
   show("home");
+  await acceptInvite();
   store.subscribe(() => { clearTimeout(syncTimer); syncTimer = setTimeout(() => reload().catch(console.warn), 400); });
   push.resync(store);
   const want = new URLSearchParams(location.search).get("item");
