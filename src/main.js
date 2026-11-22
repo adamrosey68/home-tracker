@@ -318,6 +318,13 @@ const sum = (ls) => Math.round(ls.reduce((s, l) => s + l.amount, 0) * 100) / 100
 /* A line's slot is "in", "out" (the main Going out list) or the id of the budget group it belongs to. */
 const slotKind = (slot) => (slot === "in" ? "in" : "out");
 const bgroupOf = (l) => (l.groupId ? budgetGroups.find((g) => g.id === l.groupId) : null);
+const isOneOff = (l) => l.frequency === "one-off";
+/* A group set to "Monthly only" hides its one-off lines and leaves them out of every total. */
+const shownLine = (l) => !(isOneOff(l) && bgroupOf(l)?.monthlyOnly);
+const countedLine = (l) => l.kind === "out" && shownLine(l) && (!bgroupOf(l) || bgroupOf(l).inTotal);
+const REPEAT = '<path d="M17 2.5 20.5 6 17 9.5"></path><path d="M3.5 11.5V10a4 4 0 0 1 4-4h13M7 21.5 3.5 18 7 14.5"></path><path d="M20.5 12.5V14a4 4 0 0 1-4 4h-13"></path>';
+const freqMark = (l) => (isOneOff(l) ? `<span class="lfreq once">One-off</span>`
+  : `<span class="lfreq" title="Monthly">${svg(REPEAT)}<span class="sr">Monthly</span></span>`);
 
 function iconPicker(id, l, kind) {
   const auto = billIcon(l?.name || "", kind);
@@ -336,6 +343,10 @@ function lineForm(slot, l) {
     <input type="text" id="ln-${id}" class="lname" maxlength="80" placeholder="${kind === "in" ? "e.g. Salary" : "e.g. Water"}" value="${esc(l?.name)}" autocomplete="off" required>
     <label class="sr" for="la-${id}">Amount (£)</label>
     <input type="number" id="la-${id}" class="lamt" inputmode="decimal" min="0" step="0.01" placeholder="£" value="${l ? l.amount : ""}" required>
+    <div class="lfq" role="radiogroup" aria-label="How often">
+      <label><input type="radio" name="fq-${id}" value="monthly"${isOneOff(l || {}) ? "" : " checked"}> Monthly</label>
+      <label><input type="radio" name="fq-${id}" value="one-off"${isOneOff(l || {}) ? " checked" : ""}> One-off</label>
+    </div>
     ${iconPicker(id, l, kind)}
     <div class="row">
       <button class="btn primary" type="submit">${l ? "Save" : "Add"}</button>
@@ -350,7 +361,7 @@ function lineIcon(l) {
 }
 function lineList(slot, ls) {
   const rows = ls.map((l) => budgetEdit === l.id ? `<li>${lineForm(slot, l)}</li>`
-    : `<li><button type="button" class="lrow" data-line="${l.id}">${lineIcon(l)}<span class="lname">${esc(l.name)}</span><span class="lamt">${esc(gbp.format(l.amount))}</span></button></li>`).join("");
+    : `<li><button type="button" class="lrow${isOneOff(l) ? " once" : ""}" data-line="${l.id}">${lineIcon(l)}<span class="lname">${esc(l.name)}</span>${freqMark(l)}<span class="lamt">${esc(gbp.format(l.amount))}</span></button></li>`).join("");
   const label = slot === "in" ? "Money in" : slot === "out" ? "Bill" : "Item";
   return `<ul class="llist">${rows}${budgetEdit === `new-${slot}` ? `<li>${lineForm(slot)}</li>` : ""}</ul>
     ${budgetEdit === `new-${slot}` ? "" : `<button class="btn quiet ladd" type="button" data-line-new="${slot}">+ ${label}</button>`}`;
@@ -369,7 +380,8 @@ function bgroupForm(g) {
     </div>
   </form>`;
 }
-function bgroupSect(g, gl) {
+function bgroupSect(g, all) {
+  const gl = all.filter(shownLine), hidden = all.filter((l) => !shownLine(l));
   return `<div class="bsect bgroup${g.inTotal ? "" : " off"}">
     <div class="bghead">
       <h3>${esc(g.name)} <span class="cnt">${gl.length}</span></h3>
@@ -377,7 +389,11 @@ function bgroupSect(g, gl) {
       <button class="gbtn" type="button" data-bgroup-edit="${g.id}" aria-label="Rename or delete ${esc(g.name)}">⋯</button>
     </div>
     ${bgroupEdit === g.id ? bgroupForm(g) : ""}
-    <label class="tick bgtick"><input type="checkbox" data-bgroup-total="${g.id}"${g.inTotal ? " checked" : ""}> Count in the totals</label>
+    <div class="bgticks">
+      <label class="tick bgtick"><input type="checkbox" data-bgroup-total="${g.id}"${g.inTotal ? " checked" : ""}> Count in the totals</label>
+      <label class="tick bgtick"><input type="checkbox" data-bgroup-monthly="${g.id}"${g.monthlyOnly ? " checked" : ""}> Monthly only</label>
+    </div>
+    ${hidden.length ? `<p class="bghidden">${hidden.length} one-off${hidden.length === 1 ? "" : "s"} hidden (${esc(gbp.format(sum(hidden)))}), not in the totals</p>` : ""}
     ${lineList(g.id, gl)}
   </div>`;
 }
@@ -387,8 +403,8 @@ function budgetCard() {
   const ins = ls.filter((l) => l.kind === "in");
   const outs = ls.filter((l) => l.kind === "out" && !bgroupOf(l));
   const inGroup = (g) => ls.filter((l) => l.kind === "out" && l.groupId === g.id);
-  const counted = [...outs, ...budgetGroups.filter((g) => g.inTotal).flatMap(inGroup)];
-  const skipped = budgetGroups.filter((g) => !g.inTotal && inGroup(g).length);
+  const counted = ls.filter(countedLine);
+  const skipped = budgetGroups.filter((g) => !g.inTotal && inGroup(g).filter(shownLine).length);
   const tin = sum(ins), tout = sum(counted), left = Math.round((tin - tout) * 100) / 100;
   const prev = [...new Set(lines.map((l) => l.month))].filter((x) => x < m).sort().pop();
   const empty = !ls.length && !budgetEdit;
@@ -411,7 +427,7 @@ function budgetCard() {
       <div><span class="blabel">Going out</span><span class="bnum">${esc(gbp.format(tout))}</span></div>
       <div><span class="blabel">Left over</span><span class="bnum ${left < 0 ? "neg" : "in"}">${esc(gbp.format(left))}</span></div>
     </div>
-    ${skipped.length ? `<p class="bskip">Not in these totals: ${skipped.map((g) => `${esc(g.name)} ${esc(gbp.format(sum(inGroup(g))))}`).join(" · ")}</p>` : ""}
+    ${skipped.length ? `<p class="bskip">Not in these totals: ${skipped.map((g) => `${esc(g.name)} ${esc(gbp.format(sum(inGroup(g).filter(shownLine))))}`).join(" · ")}</p>` : ""}
     <div class="bsect"><div class="bghead"><h3>Coming in <span class="cnt">${ins.length}</span></h3><span class="bgsum in">${esc(gbp.format(tin))}</span></div>${lineList("in", ins)}</div>
     ${outs.length || !budgetGroups.length || budgetEdit === "new-out" ? `<div class="bsect"><div class="bghead"><h3>Going out <span class="cnt">${outs.length}</span></h3><span class="bgsum">${esc(gbp.format(sum(outs)))}</span></div>${lineList("out", outs)}</div>` : ""}
     ${budgetGroups.map((g) => bgroupSect(g, inGroup(g))).join("")}
@@ -496,12 +512,13 @@ function renderHome() {
 
 $("#search").addEventListener("input", (e) => { filter.q = e.target.value; renderHome(); });
 $("#list").addEventListener("change", async (e) => {
-  const tot = e.target.closest("[data-bgroup-total]");
+  const tot = e.target.closest("[data-bgroup-total], [data-bgroup-monthly]");
   if (tot) {
-    const g = budgetGroups.find((x) => x.id === tot.dataset.bgroupTotal);
-    g.inTotal = tot.checked;
+    const g = budgetGroups.find((x) => x.id === (tot.dataset.bgroupTotal || tot.dataset.bgroupMonthly));
+    const patch = tot.dataset.bgroupTotal ? { inTotal: tot.checked } : { monthlyOnly: tot.checked };
+    Object.assign(g, patch);
     renderHome();
-    try { await store.updateBudgetGroup(g.id, { inTotal: g.inTotal }); } catch (err) { fail(err); await reload(); }
+    try { await store.updateBudgetGroup(g.id, patch); } catch (err) { fail(err); await reload(); }
     return;
   }
   if (!e.target.matches("[data-month-pick]")) return;
@@ -535,7 +552,7 @@ document.addEventListener("click", async (e) => {
   if (t("[data-price-cancel]")) { pricing = null; return renderHome(); }
   if ((b = t("[data-month]"))) { budgetMonth = addMonths(budgetMonth, Number(b.dataset.month)); budgetEdit = null; return renderHome(); }
   if ((b = t("[data-month-copy]"))) {
-    const copy = monthLines(b.dataset.monthCopy).map((l, n) => ({ ...l, id: uid(), month: budgetMonth, position: Date.now() + n }));
+    const copy = monthLines(b.dataset.monthCopy).filter((l) => !isOneOff(l)).map((l, n) => ({ ...l, id: uid(), month: budgetMonth, position: Date.now() + n }));
     lines.push(...copy);
     renderHome();
     try { await store.addLines(copy); toast(`Copied ${copy.length} lines into ${monthLabel(budgetMonth)}`); } catch (err) { fail(err); await reload(); }
@@ -619,19 +636,22 @@ document.addEventListener("submit", async (e) => {
     if (!name || amount == null) return;
     const id = lf.dataset.lineForm, slot = lf.dataset.slot;
     const icon = lf.querySelector(`input[name="ic-${id}"]:checked`)?.value || null;
+    const frequency = lf.querySelector(`input[name="fq-${id}"]:checked`)?.value || "monthly";
     const existing = lines.find((l) => l.id === id);
     budgetEdit = null;
     try {
       if (existing) {
-        Object.assign(existing, { name, amount, icon });
+        Object.assign(existing, { name, amount, icon, frequency });
         renderHome();
-        await store.updateLine(id, { name, amount, icon });
+        if (!shownLine(existing)) toast(`${name} is hidden because ${bgroupOf(existing).name} is set to Monthly only`);
+        await store.updateLine(id, { name, amount, icon, frequency });
       } else {
         const groupId = slot === "in" || slot === "out" ? null : slot;
-        const l = { id: uid(), householdId: household.id, month: budgetMonth, kind: slotKind(slot), name, amount, position: Date.now(), groupId, icon };
+        const l = { id: uid(), householdId: household.id, month: budgetMonth, kind: slotKind(slot), name, amount, position: Date.now(), groupId, icon, frequency };
         lines.push(l);
         budgetEdit = `new-${slot}`;
         renderHome();
+        if (!shownLine(l)) toast(`${name} is hidden because ${bgroupOf(l).name} is set to Monthly only`);
         focusLineForm();
         await store.addLines([l]);
       }
@@ -1197,14 +1217,14 @@ $("#exportBackup").onclick = async () => {
     const months = [...new Set(lines.map((l) => l.month))].sort().reverse();
     const summary = months.map((m) => {
       const ls = monthLines(m), tin = sum(ls.filter((l) => l.kind === "in"));
-      const tout = sum(ls.filter((l) => l.kind === "out" && (!bgroupOf(l) || bgroupOf(l).inTotal)));
+      const tout = sum(ls.filter(countedLine));
       return [monthLabel(m), tin, tout, Math.round((tin - tout) * 100) / 100];
     });
     X.utils.book_append_sheet(wb, sheet([["Month", "Coming in (£)", "Going out (£)", "Left over (£)"], ...summary], [16, 14, 14, 14]), "Budget by month");
     const budget = months.flatMap((m) => monthLines(m).sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "in" ? -1 : 1))
       .map((l) => [monthLabel(m), l.kind === "in" ? "Coming in" : "Going out", bgroupOf(l)?.name || "", l.name, l.amount,
-        bgroupOf(l) && !bgroupOf(l).inTotal ? "No" : "Yes"]));
-    X.utils.book_append_sheet(wb, sheet([["Month", "In or out", "Group", "What", "Amount (£)", "In the totals"], ...budget], [16, 11, 22, 24, 11, 12]), "Budget lines");
+        isOneOff(l) ? "One-off" : "Monthly", l.kind === "in" || countedLine(l) ? "Yes" : "No"]));
+    X.utils.book_append_sheet(wb, sheet([["Month", "In or out", "Group", "What", "Amount (£)", "How often", "In the totals"], ...budget], [16, 11, 22, 24, 11, 11, 12]), "Budget lines");
 
     const vrows = vehicles.flatMap((v) => [
       ...[["Registration", v.registration], ["Make", v.make], ["Model", v.model], ["Nickname", v.nickname]].filter(([, x]) => x),

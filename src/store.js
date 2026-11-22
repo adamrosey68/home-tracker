@@ -25,19 +25,20 @@ const toVehicle = (r) => ({
 });
 const toLine = (r) => ({
   id: r.id, householdId: r.household_id, month: r.month, kind: r.kind, name: r.name, amount: Number(r.amount), position: r.position,
-  groupId: r.group_id, icon: r.icon,
+  groupId: r.group_id, icon: r.icon, frequency: r.frequency,
 });
 function lineRow(l) {
   const r = {};
-  for (const k of ["month", "kind", "name", "amount", "position", "icon"]) if (k in l) r[k] = l[k];
+  for (const k of ["month", "kind", "name", "amount", "position", "icon", "frequency"]) if (k in l) r[k] = l[k];
   if ("groupId" in l) r.group_id = l.groupId || null;
   return r;
 }
-const toBudgetGroup = (r) => ({ id: r.id, householdId: r.household_id, name: r.name, inTotal: r.in_total, position: r.position });
+const toBudgetGroup = (r) => ({ id: r.id, householdId: r.household_id, name: r.name, inTotal: r.in_total, monthlyOnly: r.monthly_only, position: r.position });
 function budgetGroupRow(g) {
   const r = {};
   for (const k of ["name", "position"]) if (k in g) r[k] = g[k];
   if ("inTotal" in g) r.in_total = g.inTotal;
+  if ("monthlyOnly" in g) r.monthly_only = g.monthlyOnly;
   return r;
 }
 function groupRow(g) {
