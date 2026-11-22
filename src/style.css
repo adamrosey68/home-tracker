@@ -252,7 +252,8 @@ ul { list-style: none; margin: 0; padding: 0; }
 .lrow .lsub.soon { color: var(--warn); font-weight: 600; }
 .lrow .lsub.late { color: var(--danger); font-weight: 600; }
 .lbell svg { width: 12px; height: 12px; vertical-align: -1px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.ldates, .lplan, .lspend { grid-column: 1 / -1; }
+.ldates, .lplan, .lspend, .lform .lnote { grid-column: 1 / -1; }
+.lrow .lsub.lnotes { font-style: italic; }
 .lspend .hint { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
 .lrow .lsub.spend b { color: var(--fg); font-weight: 600; }
 .lrow .lsub.spend.over b { color: var(--danger); }

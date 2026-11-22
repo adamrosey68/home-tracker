@@ -26,13 +26,14 @@ const toVehicle = (r) => ({
 const toLine = (r) => ({
   id: r.id, householdId: r.household_id, month: r.month, kind: r.kind, name: r.name, amount: Number(r.amount), position: r.position,
   groupId: r.group_id, icon: r.icon, frequency: r.frequency, startedOn: r.started_on, endsOn: r.ends_on, remind: r.remind,
-  plan: (r.plan || []).map((s) => ({ ...s, amount: Number(s.amount) })),
+  plan: (r.plan || []).map((s) => ({ ...s, amount: Number(s.amount) })), note: r.note,
 });
 function lineRow(l) {
   const r = {};
   for (const k of ["month", "kind", "name", "amount", "position", "icon", "frequency", "remind", "plan"]) if (k in l) r[k] = l[k];
   if ("groupId" in l) r.group_id = l.groupId || null;
   if ("startedOn" in l) r.started_on = l.startedOn || null;
+  if ("note" in l) r.note = l.note || null;
   if ("endsOn" in l) { r.ends_on = l.endsOn || null; r.reminded = null; }
   return r;
 }

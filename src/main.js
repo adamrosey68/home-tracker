@@ -502,6 +502,8 @@ function lineForm(slot, l) {
       <label><input type="radio" name="fq-${id}" value="monthly"${isOneOff(l || {}) ? "" : " checked"}> Monthly</label>
       <label><input type="radio" name="fq-${id}" value="one-off"${isOneOff(l || {}) ? " checked" : ""}> One-off</label>
     </div>
+    <label class="sr" for="lnote-${id}">Note</label>
+    <input type="text" id="lnote-${id}" class="lnote" maxlength="200" placeholder="Note, e.g. renews 30 Nov at £7.00" value="${esc(l?.note)}" autocomplete="off">
     ${spendPicker(l)}
     ${datesPicker(id, l)}
     ${planPicker(l)}
@@ -519,7 +521,7 @@ function lineIcon(l) {
 }
 function lineList(slot, ls) {
   const rows = ls.map((l) => budgetEdit === l.id ? `<li>${lineForm(slot, l)}</li>`
-    : `<li><button type="button" class="lrow${isOneOff(l) ? " once" : ""}" data-line="${l.id}">${lineIcon(l)}<span class="lname">${esc(l.name)}${spendLine(l)}${datesLine(l)}${planLine(l)}</span>${freqMark(l)}<span class="lamt">${esc(gbp.format(l.amount))}</span></button></li>`).join("");
+    : `<li><button type="button" class="lrow${isOneOff(l) ? " once" : ""}" data-line="${l.id}">${lineIcon(l)}<span class="lname">${esc(l.name)}${l.note ? `<span class="lsub lnotes">${esc(l.note)}</span>` : ""}${spendLine(l)}${datesLine(l)}${planLine(l)}</span>${freqMark(l)}<span class="lamt">${esc(gbp.format(l.amount))}</span></button></li>`).join("");
   const label = slot === "in" ? "Money in" : slot === "out" ? "Bill" : "Item";
   return `<ul class="llist">${rows}${budgetEdit === `new-${slot}` ? `<li>${lineForm(slot)}</li>` : ""}</ul>
     ${budgetEdit === `new-${slot}` ? "" : `<button class="btn quiet ladd" type="button" data-line-new="${slot}">+ ${label}</button>`}`;
@@ -851,12 +853,13 @@ document.addEventListener("submit", async (e) => {
     const startedOn = lf.querySelector(".lstart").value || plan[0]?.from || null;
     const endsOn = lf.querySelector(".lend").value || plan.at(-1)?.to || null;
     const remind = lf.querySelector(".lremind").checked;
+    const note = lf.querySelector(".lnote").value.trim() || null;
     if (startedOn && endsOn && endsOn < startedOn) { toast("The expiry date is before the start date"); return; }
     const existing = lines.find((l) => l.id === id);
     budgetEdit = null;
     try {
       if (existing) {
-        const patch = { name, amount, icon, frequency, startedOn, remind, plan };
+        const patch = { name, amount, icon, frequency, startedOn, remind, plan, note };
         if (endsOn !== (existing.endsOn || null)) patch.endsOn = endsOn;
         Object.assign(existing, patch);
         renderHome();
@@ -865,7 +868,7 @@ document.addEventListener("submit", async (e) => {
       } else {
         const groupId = slot === "in" || slot === "out" ? null : slot;
         const l = { id: uid(), householdId: household.id, month: budgetMonth, kind: slotKind(slot), name, amount, position: Date.now(),
-          groupId, icon, frequency, startedOn, endsOn, remind, plan };
+          groupId, icon, frequency, startedOn, endsOn, remind, plan, note };
         lines.push(l);
         budgetEdit = `new-${slot}`;
         renderHome();
@@ -1442,9 +1445,9 @@ $("#exportBackup").onclick = async () => {
     const budget = months.flatMap((m) => monthLines(m).sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "in" ? -1 : 1))
       .map((l) => [monthLabel(m), l.kind === "in" ? "Coming in" : "Going out", bgroupOf(l)?.name || "", l.name, l.amount,
         isOneOff(l) ? "One-off" : "Monthly", l.kind === "in" || countedLine(l) ? "Yes" : "No",
-        l.startedOn ? prettyDate(l.startedOn) : "", l.endsOn ? prettyDate(l.endsOn) : ""]));
-    X.utils.book_append_sheet(wb, sheet([["Month", "In or out", "Group", "What", "Amount (£)", "How often", "In the totals", "Started", "Expires"], ...budget],
-      [16, 11, 22, 24, 11, 11, 12, 13, 13]), "Budget lines");
+        l.startedOn ? prettyDate(l.startedOn) : "", l.endsOn ? prettyDate(l.endsOn) : "", l.note || ""]));
+    X.utils.book_append_sheet(wb, sheet([["Month", "In or out", "Group", "What", "Amount (£)", "How often", "In the totals", "Started", "Expires", "Note"], ...budget],
+      [16, 11, 22, 24, 11, 11, 12, 13, 13, 40]), "Budget lines");
     const spent = [...lines].sort((a, b) => a.month.localeCompare(b.month) || a.position - b.position)
       .flatMap((l) => spendsOf(l).map((s) => [monthLabel(l.month), l.name, s.place, s.amount, s.pending ? "Yes" : ""]));
     if (spent.length) X.utils.book_append_sheet(wb, sheet([["Month", "Budget", "Where", "Amount (£)", "Pending"], ...spent], [16, 22, 24, 11, 9]), "Spending");
