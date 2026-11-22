@@ -349,6 +349,7 @@ function lengthText(a, b) {
 function datesLine(l) {
   if (!l.startedOn && !l.endsOn) return "";
   const bits = [], d = l.endsOn ? daysUntil(l.endsOn) : null;
+  if (l.plan?.length && l.endsOn === l.plan.at(-1).to && d > 30) return "";
   if (l.startedOn) bits.push(`${l.startedOn > todayIso() ? "Starts" : "Started"} ${prettyDate(l.startedOn)}`);
   if (l.endsOn) {
     bits.push(d < 0 ? `Expired ${prettyDate(l.endsOn)}` : d === 0 ? "Expires today"
@@ -372,6 +373,65 @@ function datesPicker(id, l) {
     <label class="tick"><input type="checkbox" class="lremind"${l?.remind === false ? "" : " checked"}> Remind us a month before it expires</label>
   </details>`;
 }
+/* Payments in a plan stage fall on the start date's day each month, up to and including the end date. */
+function stagePayments(s) {
+  const out = [];
+  for (let i = 0; i < 600; i++) {
+    const d = addMonths(s.from, i);
+    if (d > s.to) break;
+    out.push(d);
+  }
+  return out;
+}
+function planInfo(plan) {
+  const today = todayIso();
+  const stages = (plan || []).map((s) => {
+    const pays = stagePayments(s), left = pays.filter((d) => d >= today);
+    return { ...s, count: pays.length, left: left.length, leftAmount: left.length * s.amount, next: left[0] };
+  });
+  const left = stages.reduce((n, s) => n + s.left, 0);
+  const leftAmount = Math.round(stages.reduce((n, s) => n + s.leftAmount, 0) * 100) / 100;
+  const current = stages.find((s) => s.next);
+  return { stages, left, leftAmount, current, total: stages.reduce((n, s) => n + s.count * s.amount, 0) };
+}
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+function planLine(l) {
+  if (!l.plan?.length) return "";
+  const p = planInfo(l.plan);
+  if (!p.left) return `<span class="lsub">Plan paid off · ${esc(gbp.format(p.total))} in total</span>`;
+  const now = p.current;
+  return `<span class="lsub plan">${esc(gbp.format(now.amount))} a month until ${prettyDate(now.to)} · <b>${esc(gbp.format(p.leftAmount))} left</b> over ${plural(p.left, "payment")}</span>`;
+}
+function planStage(s = {}) {
+  return `<div class="pstage">
+    <label>From<input type="date" class="pfrom" value="${esc(s.from)}"></label>
+    <label>To<input type="date" class="pto" value="${esc(s.to)}"></label>
+    <label>£ a month<input type="number" class="pamt" inputmode="decimal" min="0" step="0.01" value="${s.amount ?? ""}"></label>
+    <button class="gbtn" type="button" data-plan-remove aria-label="Remove this stage">×</button>
+  </div>`;
+}
+function planSummary(plan) {
+  if (!plan.length) return "";
+  const p = planInfo(plan);
+  return `<ul class="psum">${p.stages.map((s) => `<li>${prettyDate(s.from)} to ${prettyDate(s.to)}: ${plural(s.count, "payment")} of ${esc(gbp.format(s.amount))}, ${s.left
+    ? `${s.left} left (${esc(gbp.format(s.leftAmount))})` : "all paid"}</li>`).join("")}
+    <li class="ptot">Total left to pay: <b>${esc(gbp.format(p.leftAmount))}</b> over ${plural(p.left, "month")}</li></ul>`;
+}
+function planPicker(l) {
+  const plan = l?.plan || [];
+  return `<details class="lplan"${plan.length ? " open" : ""}>
+    <summary>Payment plan</summary>
+    <p class="hint">For agreements like a phone contract: add each stage with its dates and monthly amount.</p>
+    <div class="pstages">${plan.map(planStage).join("")}</div>
+    <button class="btn quiet" type="button" data-plan-add>+ Add a stage</button>
+    <div class="psumwrap">${planSummary(plan)}</div>
+  </details>`;
+}
+function readPlan(form) {
+  return [...form.querySelectorAll(".pstage")].map((r) => ({
+    from: r.querySelector(".pfrom").value, to: r.querySelector(".pto").value, amount: toNum(r.querySelector(".pamt").value),
+  })).filter((s) => s.from && s.to && s.amount != null && s.to >= s.from).sort((a, b) => a.from.localeCompare(b.from));
+}
 function lineForm(slot, l) {
   const kind = slotKind(slot);
   const id = l ? l.id : `new-${slot}`;
@@ -385,6 +445,7 @@ function lineForm(slot, l) {
       <label><input type="radio" name="fq-${id}" value="one-off"${isOneOff(l || {}) ? " checked" : ""}> One-off</label>
     </div>
     ${datesPicker(id, l)}
+    ${planPicker(l)}
     ${iconPicker(id, l, kind)}
     <div class="row">
       <button class="btn primary" type="submit">${l ? "Save" : "Add"}</button>
@@ -399,7 +460,7 @@ function lineIcon(l) {
 }
 function lineList(slot, ls) {
   const rows = ls.map((l) => budgetEdit === l.id ? `<li>${lineForm(slot, l)}</li>`
-    : `<li><button type="button" class="lrow${isOneOff(l) ? " once" : ""}" data-line="${l.id}">${lineIcon(l)}<span class="lname">${esc(l.name)}${datesLine(l)}</span>${freqMark(l)}<span class="lamt">${esc(gbp.format(l.amount))}</span></button></li>`).join("");
+    : `<li><button type="button" class="lrow${isOneOff(l) ? " once" : ""}" data-line="${l.id}">${lineIcon(l)}<span class="lname">${esc(l.name)}${datesLine(l)}${planLine(l)}</span>${freqMark(l)}<span class="lamt">${esc(gbp.format(l.amount))}</span></button></li>`).join("");
   const label = slot === "in" ? "Money in" : slot === "out" ? "Bill" : "Item";
   return `<ul class="llist">${rows}${budgetEdit === `new-${slot}` ? `<li>${lineForm(slot)}</li>` : ""}</ul>
     ${budgetEdit === `new-${slot}` ? "" : `<button class="btn quiet ladd" type="button" data-line-new="${slot}">+ ${label}</button>`}`;
@@ -549,7 +610,12 @@ function renderHome() {
 }
 
 $("#search").addEventListener("input", (e) => { filter.q = e.target.value; renderHome(); });
+$("#list").addEventListener("input", (e) => {
+  const plan = e.target.closest(".lplan");
+  if (plan) plan.querySelector(".psumwrap").innerHTML = planSummary(readPlan(plan));
+});
 $("#list").addEventListener("change", async (e) => {
+  if (e.target.closest(".lplan")) return;
   const dates = e.target.closest(".ldates");
   if (dates) {
     const start = dates.querySelector(".lstart"), len = dates.querySelector(".llen"), end = dates.querySelector(".lend");
@@ -586,6 +652,19 @@ $("#openSettings").onclick = () => show("settings");
 document.addEventListener("click", async (e) => {
   const t = (sel) => e.target.closest(sel);
   let b;
+  if ((b = t("[data-plan-add]"))) {
+    const box = b.closest(".lplan"), last = readPlan(box).at(-1);
+    const from = last ? addMonths(last.to, 1) : b.closest("form").querySelector(".lstart").value || todayIso();
+    box.querySelector(".pstages").insertAdjacentHTML("beforeend", planStage({ from }));
+    box.querySelector(".pstage:last-child .pto").focus();
+    return;
+  }
+  if ((b = t("[data-plan-remove]"))) {
+    const box = b.closest(".lplan");
+    b.closest(".pstage").remove();
+    box.querySelector(".psumwrap").innerHTML = planSummary(readPlan(box));
+    return;
+  }
   if ((b = t("[data-open]"))) return openItem(b.dataset.open);
   if ((b = t("[data-add]"))) return openItem(null, { area: b.dataset.add || "home" });
   if ((b = t("[data-add-entry]"))) return openItem(null, { groupId: b.dataset.addEntry });
@@ -686,14 +765,16 @@ document.addEventListener("submit", async (e) => {
     const id = lf.dataset.lineForm, slot = lf.dataset.slot;
     const icon = lf.querySelector(`input[name="ic-${id}"]:checked`)?.value || null;
     const frequency = lf.querySelector(`input[name="fq-${id}"]:checked`)?.value || "monthly";
-    const startedOn = lf.querySelector(".lstart").value || null, endsOn = lf.querySelector(".lend").value || null;
+    const plan = readPlan(lf);
+    const startedOn = lf.querySelector(".lstart").value || plan[0]?.from || null;
+    const endsOn = lf.querySelector(".lend").value || plan.at(-1)?.to || null;
     const remind = lf.querySelector(".lremind").checked;
     if (startedOn && endsOn && endsOn < startedOn) { toast("The expiry date is before the start date"); return; }
     const existing = lines.find((l) => l.id === id);
     budgetEdit = null;
     try {
       if (existing) {
-        const patch = { name, amount, icon, frequency, startedOn, remind };
+        const patch = { name, amount, icon, frequency, startedOn, remind, plan };
         if (endsOn !== (existing.endsOn || null)) patch.endsOn = endsOn;
         Object.assign(existing, patch);
         renderHome();
@@ -702,7 +783,7 @@ document.addEventListener("submit", async (e) => {
       } else {
         const groupId = slot === "in" || slot === "out" ? null : slot;
         const l = { id: uid(), householdId: household.id, month: budgetMonth, kind: slotKind(slot), name, amount, position: Date.now(),
-          groupId, icon, frequency, startedOn, endsOn, remind };
+          groupId, icon, frequency, startedOn, endsOn, remind, plan };
         lines.push(l);
         budgetEdit = `new-${slot}`;
         renderHome();

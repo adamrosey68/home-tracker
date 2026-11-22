@@ -252,8 +252,17 @@ ul { list-style: none; margin: 0; padding: 0; }
 .lrow .lsub.soon { color: var(--warn); font-weight: 600; }
 .lrow .lsub.late { color: var(--danger); font-weight: 600; }
 .lbell svg { width: 12px; height: 12px; vertical-align: -1px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.ldates { grid-column: 1 / -1; }
-.ldates summary { cursor: pointer; font-size: 14px; color: var(--accent); font-weight: 600; min-height: 32px; display: flex; align-items: center; }
+.ldates, .lplan { grid-column: 1 / -1; }
+.lplan .hint { margin: 0 0 6px; font-size: 13px; color: var(--muted); }
+.pstages { display: grid; gap: 8px; }
+.pstage { display: grid; grid-template-columns: 1fr 1fr 90px 36px; gap: 6px; align-items: end; }
+.pstage label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.pstage input { min-width: 0; }
+.pstage .gbtn { height: 40px; }
+.psum { list-style: none; margin: 8px 0 4px; padding: 8px 10px; border-radius: 8px; background: var(--bg); display: grid; gap: 3px; font-size: 13px; color: var(--muted); }
+.psum .ptot { color: var(--fg); font-size: 14px; margin-top: 2px; }
+.lrow .lsub.plan b { color: var(--fg); font-weight: 600; }
+.ldates summary, .lplan summary { cursor: pointer; font-size: 14px; color: var(--accent); font-weight: 600; min-height: 32px; display: flex; align-items: center; }
 .ldgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin: 4px 0 8px; }
 .ldgrid label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
 .ldates .tick { font-size: 14px; }
