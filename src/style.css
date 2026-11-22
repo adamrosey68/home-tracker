@@ -137,8 +137,12 @@ select { appearance: none; -webkit-appearance: none; background-image: linear-gr
 .aicon.savings { background: var(--ok-soft); color: var(--ok); }
 .savtotal { margin-left: auto; font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ok); font-variant-numeric: tabular-nums; }
 .savtotal + .caret { margin-left: 8px; }
+.savsum { display: none; justify-content: space-between; align-items: baseline; margin: 0; padding: 0 2px; font-size: 14px; color: var(--muted); }
+.savsum b { font-family: var(--font-display); font-size: 18px; color: var(--ok); font-variant-numeric: tabular-nums; }
 .savbal { font-family: var(--font-display); font-weight: 700; font-size: 20px; color: var(--ok); font-variant-numeric: tabular-nums; }
 .savbal.neg { color: var(--danger); }
+.savacc .pname { overflow-wrap: break-word; font-size: 16px; }
+@media (max-width: 400px) { .savbal { font-size: 17px; } }
 .savlist { display: grid; gap: 12px; max-width: 760px; }
 .savbody { padding: 10px 14px; display: grid; gap: 8px; }
 .savbody + .savbody { padding-top: 0; }
@@ -273,6 +277,14 @@ ul { list-style: none; margin: 0; padding: 0; }
 .bnum { font-family: var(--font-display); font-weight: 700; font-size: 18px; font-variant-numeric: tabular-nums; }
 .bnum.in { color: var(--ok); }
 .bnum.neg { color: var(--danger); }
+/* Three totals side by side don't fit narrow phones (or Display Zoom / larger Safari text), so stack them. */
+@media (max-width: 400px) {
+  .btotals { grid-template-columns: 1fr; gap: 2px; }
+  .btotals div { flex-direction: row; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .blabel { font-size: 13px; }
+  .savtotal { display: none; }
+  .savsum { display: flex; }
+}
 .bsect { padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
 .bsect + .bsect { border-top: 1px solid var(--line); }
 .bsect h3 { display: flex; align-items: center; gap: 8px; }

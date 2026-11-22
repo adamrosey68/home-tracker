@@ -704,6 +704,7 @@ function savingsSection(a) {
       </button>
       <button class="btn quiet" type="button" data-sav-new>+ Account</button></div>
     ${shut ? "" : `<div class="savlist">
+      ${accounts.length ? `<p class="savsum">Total in savings <b>${pounds(total)}</b></p>` : ""}
       ${savEdit === "new" ? `<section class="pcard savnew"><div class="savbody">${accountForm(null)}</div></section>` : ""}
       ${shown.map(accountCard).join("")}
       ${!accounts.length && savEdit !== "new" ? `<p class="empty">No savings yet. Tap “+ Account” to add one, with how much is in it now.</p>` : ""}
