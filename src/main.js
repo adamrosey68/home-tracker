@@ -319,9 +319,12 @@ const monthLabel = (m) => new Date(dayNum(m) * 86400000).toLocaleDateString("en-
 const monthLines = (m) => lines.filter((l) => l.month === m).sort((a, b) => a.position - b.position);
 const sum = (ls) => Math.round(ls.reduce((s, l) => s + l.amount, 0) * 100) / 100;
 
-/* A line's slot is "in", "out" (the main Going out list) or the id of the budget group it belongs to. */
-const slotKind = (slot) => (slot === "in" ? "in" : "out");
+/* A line's slot is "in", "out" (the main Going out list), the id of the budget group it belongs to,
+   or "pot-" plus a group id for money coming into that group, like DLA. */
+const slotKind = (slot) => (slot === "in" || slot.startsWith("pot-") ? "in" : "out");
+const slotGroup = (slot) => (slot === "in" || slot === "out" ? null : slot.replace(/^pot-/, ""));
 const bgroupOf = (l) => (l.groupId ? budgetGroups.find((g) => g.id === l.groupId) : null);
+const countedIn = (l) => l.kind === "in" && (!bgroupOf(l) || bgroupOf(l).inTotal);
 const isOneOff = (l) => l.frequency === "one-off";
 /* A group set to "Monthly only" hides its one-off lines and leaves them out of every total. */
 const shownLine = (l) => !(isOneOff(l) && bgroupOf(l)?.monthlyOnly);
@@ -516,12 +519,54 @@ async function addSpend(lineId) {
   $(`#sp-place-${lineId}`)?.focus();
   try { await store.addSpend(s); } catch (err) { fail(err); await reload(); }
 }
+/* Money into a group, like DLA, pays towards outgoings in the same month: its funds list each one and how much. */
+const round2 = (n) => Math.round(n * 100) / 100;
+const fundsOf = (p) => (p.funds || []).filter((f) => lines.some((l) => l.id === f.to));
+const fundsInto = (l) => lines.filter((p) => p.kind === "in" && p.month === l.month)
+  .flatMap((p) => (p.funds || []).filter((f) => f.to === l.id).map((f) => ({ pot: p, amount: f.amount })));
+const fundedOf = (l) => round2(fundsInto(l).reduce((s, f) => s + f.amount, 0));
+function fundLine(l) {
+  const fs = fundsInto(l);
+  if (!fs.length) return "";
+  const rest = round2(l.amount - fundedOf(l));
+  return `<span class="lsub fund">${fs.map((f) => `${esc(gbp.format(f.amount))} from ${esc(f.pot.name)}`).join(" · ")}${rest > 0
+    ? ` · ${esc(gbp.format(rest))} from elsewhere` : " · <b>all covered</b>"}</span>`;
+}
+function potBox(p, outs) {
+  const fs = fundsOf(p), used = round2(fs.reduce((s, f) => s + f.amount, 0)), left = round2(p.amount - used);
+  const rows = fs.map((f) => {
+    const o = lines.find((l) => l.id === f.to);
+    return `<li class="fdrow"><span class="fdname">${esc(o.name)}${f.amount < o.amount ? ` <span class="fdof">(of ${esc(gbp.format(o.amount))})</span>` : ""}</span>
+      <span class="fdamt">${esc(gbp.format(f.amount))}</span>
+      <button class="gbtn" type="button" data-fund-del="${p.id}" data-fund-to="${f.to}" aria-label="Stop paying ${esc(o.name)} from ${esc(p.name)}">×</button></li>`;
+  }).join("");
+  return `<div class="fund">
+    ${fs.length ? `<p class="fdhead">Where ${esc(p.name)} goes</p><ul class="fdlist">${rows}</ul>
+      <p class="fdsum${left < 0 ? " over" : ""}">${esc(gbp.format(used))} of ${esc(gbp.format(p.amount))} used · <b>${left < 0
+        ? `${esc(gbp.format(-left))} more than comes in` : `${esc(gbp.format(left))} left`}</b></p>`
+      : `<p class="hint">Choose which outgoings ${esc(p.name)} pays towards, and how much.</p>`}
+    ${outs.length ? `<div class="fdadd">
+      <label class="sr" for="fd-to-${p.id}">Pays towards</label>
+      <select id="fd-to-${p.id}" class="fd-to"><option value="">Pays towards…</option>${outs.map((o) =>
+        `<option value="${o.id}">${esc(o.name)} (${esc(gbp.format(o.amount))})</option>`).join("")}</select>
+      <label class="sr" for="fd-amt-${p.id}">How much (£)</label>
+      <input type="number" id="fd-amt-${p.id}" class="fd-amt" inputmode="decimal" min="0" step="0.01" placeholder="£">
+      <button class="btn" type="button" data-fund-add="${p.id}">Add</button>
+    </div>` : `<p class="hint">Add the outgoings first, then link them here.</p>`}
+  </div>`;
+}
+function potList(g, pots, outs) {
+  const slot = `pot-${g.id}`, adding = budgetEdit === `new-${slot}`;
+  const rows = pots.map((p) => budgetEdit === p.id ? `<li>${lineForm(slot, p)}</li>` : `<li class="pot">${lineRowBtn(p)}${potBox(p, outs)}</li>`).join("");
+  return `${pots.length || adding ? `<ul class="llist pots">${rows}${adding ? `<li>${lineForm(slot)}</li>` : ""}</ul>` : ""}
+    ${adding ? "" : `<button class="btn quiet ladd" type="button" data-line-new="${slot}">+ Money in${pots.length ? "" : ", like DLA"}</button>`}`;
+}
 function lineForm(slot, l) {
   const kind = slotKind(slot);
   const id = l ? l.id : `new-${slot}`;
   return `<form class="lform" data-line-form="${id}" data-slot="${slot}">
     <label class="sr" for="ln-${id}">What</label>
-    <input type="text" id="ln-${id}" class="lname" maxlength="80" placeholder="${kind === "in" ? "e.g. Salary" : "e.g. Water"}" value="${esc(l?.name)}" autocomplete="off" required>
+    <input type="text" id="ln-${id}" class="lname" maxlength="80" placeholder="${slot.startsWith("pot-") ? "e.g. DLA" : kind === "in" ? "e.g. Salary" : "e.g. Water"}" value="${esc(l?.name)}" autocomplete="off" required>
     <label class="sr" for="la-${id}">Amount (£)</label>
     <input type="number" id="la-${id}" class="lamt" inputmode="decimal" min="0" step="0.01" placeholder="£" value="${l ? l.amount : ""}" required>
     <div class="lfq" role="radiogroup" aria-label="How often">
@@ -547,9 +592,10 @@ function lineIcon(l) {
   const { icon, tone } = billIcon(l.name, l.kind, l.icon);
   return `<span class="aicon sm ${tone}">${svg(icon)}</span>`;
 }
+const lineRowBtn = (l) => `<button type="button" class="lrow${isOneOff(l) ? " once" : ""}" data-line="${l.id}">${lineIcon(l)}<span class="lname">${esc(l.name)}${l.note
+  ? `<span class="lsub lnotes">${esc(l.note)}</span>` : ""}${spendLine(l)}${fundLine(l)}${datesLine(l)}${planLine(l)}</span>${freqMark(l)}<span class="lamtw"><span class="lamt">${esc(gbp.format(l.amount))}</span>${yearNote(l)}</span></button>`;
 function lineList(slot, ls) {
-  const rows = ls.map((l) => budgetEdit === l.id ? `<li>${lineForm(slot, l)}</li>`
-    : `<li><button type="button" class="lrow${isOneOff(l) ? " once" : ""}" data-line="${l.id}">${lineIcon(l)}<span class="lname">${esc(l.name)}${l.note ? `<span class="lsub lnotes">${esc(l.note)}</span>` : ""}${spendLine(l)}${datesLine(l)}${planLine(l)}</span>${freqMark(l)}<span class="lamtw"><span class="lamt">${esc(gbp.format(l.amount))}</span>${yearNote(l)}</span></button></li>`).join("");
+  const rows = ls.map((l) => budgetEdit === l.id ? `<li>${lineForm(slot, l)}</li>` : `<li>${lineRowBtn(l)}</li>`).join("");
   const label = slot === "in" ? "Money in" : slot === "out" ? "Bill" : "Item";
   return `<ul class="llist">${rows}${budgetEdit === `new-${slot}` ? `<li>${lineForm(slot)}</li>` : ""}</ul>
     ${budgetEdit === `new-${slot}` ? "" : `<button class="btn quiet ladd" type="button" data-line-new="${slot}">+ ${label}</button>`}`;
@@ -568,7 +614,7 @@ function bgroupForm(g) {
     </div>
   </form>`;
 }
-function bgroupSect(g, all) {
+function bgroupSect(g, all, pots) {
   const gl = all.filter(shownLine), hidden = all.filter((l) => !shownLine(l));
   return `<div class="bsect bgroup${g.inTotal ? "" : " off"}">
     <div class="bghead">
@@ -583,18 +629,20 @@ function bgroupSect(g, all) {
     </div>
     ${gl.some((l) => yearlyOf(l) != null) ? `<p class="bgyear">Regular items come to <b>${esc(gbp.format(Math.round(gl.reduce((s, l) => s + (yearlyOf(l) ?? 0), 0) * 100) / 100))}</b> a year</p>` : ""}
     ${hidden.length ? `<div class="bghidden"><p>${hidden.length} one-off${hidden.length === 1 ? "" : "s"} hidden (${esc(gbp.format(sum(hidden)))}), not in the totals:</p><ul>${hidden.map((l) => `<li><span>${esc(l.name)}</span><span>${esc(gbp.format(l.amount))}</span></li>`).join("")}</ul></div>` : ""}
-    ${lineList(g.id, gl)}
+    ${pots.length || budgetEdit === `new-pot-${g.id}` ? `<h4 class="bgsub">Coming in</h4>${potList(g, pots, gl)}<h4 class="bgsub">Going out</h4>${lineList(g.id, gl)}`
+      : `${lineList(g.id, gl)}${potList(g, pots, gl)}`}
   </div>`;
 }
 function budgetCard() {
   const m = budgetMonth;
   const ls = monthLines(m);
-  const ins = ls.filter((l) => l.kind === "in");
+  const ins = ls.filter((l) => l.kind === "in" && !bgroupOf(l));
   const outs = ls.filter((l) => l.kind === "out" && !bgroupOf(l));
   const inGroup = (g) => ls.filter((l) => l.kind === "out" && l.groupId === g.id);
+  const potsOf = (g) => ls.filter((l) => l.kind === "in" && l.groupId === g.id);
   const counted = ls.filter(countedLine);
   const skipped = budgetGroups.filter((g) => !g.inTotal && inGroup(g).filter(shownLine).length);
-  const tin = sum(ins), tout = sum(counted), left = Math.round((tin - tout) * 100) / 100;
+  const tin = sum(ls.filter(countedIn)), tout = sum(counted), left = Math.round((tin - tout) * 100) / 100;
   const prev = [...new Set(lines.map((l) => l.month))].filter((x) => x < m).sort().pop();
   const empty = !ls.length && !budgetEdit;
   return `<section class="pcard budget">
@@ -617,9 +665,9 @@ function budgetCard() {
       <div><span class="blabel">Left over</span><span class="bnum ${left < 0 ? "neg" : "in"}">${esc(gbp.format(left))}</span></div>
     </div>
     ${skipped.length ? `<p class="bskip">Not in these totals: ${skipped.map((g) => `${esc(g.name)} ${esc(gbp.format(sum(inGroup(g).filter(shownLine))))}`).join(" · ")}</p>` : ""}
-    <div class="bsect"><div class="bghead"><h3>Coming in <span class="cnt">${ins.length}</span></h3><span class="bgsum in">${esc(gbp.format(tin))}</span></div>${lineList("in", ins)}</div>
+    <div class="bsect"><div class="bghead"><h3>Coming in <span class="cnt">${ins.length}</span></h3><span class="bgsum in">${esc(gbp.format(sum(ins)))}</span></div>${lineList("in", ins)}</div>
     ${outs.length || !budgetGroups.length || budgetEdit === "new-out" ? `<div class="bsect"><div class="bghead"><h3>Going out <span class="cnt">${outs.length}</span></h3><span class="bgsum">${esc(gbp.format(sum(outs)))}</span></div>${lineList("out", outs)}</div>` : ""}
-    ${budgetGroups.map((g) => bgroupSect(g, inGroup(g))).join("")}
+    ${budgetGroups.map((g) => bgroupSect(g, inGroup(g), potsOf(g))).join("")}
     <div class="bsect bgnew">${bgroupEdit === "new" ? bgroupForm(null)
       : `<button class="btn quiet ladd" type="button" data-bgroup-new>+ New group of outgoings</button>`}</div>`}
   </section>`;
@@ -815,6 +863,8 @@ function renderHome() {
 
 $("#search").addEventListener("input", (e) => { filter.q = e.target.value; renderHome(); });
 $("#list").addEventListener("keydown", (e) => {
+  const fd = e.key === "Enter" && e.target.closest(".fdadd");
+  if (fd) { e.preventDefault(); fd.querySelector("[data-fund-add]").click(); return; }
   const add = e.key === "Enter" && e.target.closest(".spadd");
   if (!add) return;
   e.preventDefault();
@@ -832,6 +882,17 @@ $("#list").addEventListener("input", (e) => {
   if (plan) plan.querySelector(".psumwrap").innerHTML = planSummary(readPlan(plan));
 });
 $("#list").addEventListener("change", async (e) => {
+  if (e.target.classList.contains("fd-to")) {
+    const p = lines.find((l) => l.id === e.target.closest(".pot").querySelector("[data-line]").dataset.line);
+    const o = lines.find((l) => l.id === e.target.value), amt = e.target.closest(".fdadd").querySelector(".fd-amt");
+    if (!o) return;
+    const already = (p.funds || []).find((f) => f.to === o.id);
+    const left = round2(p.amount - fundsOf(p).filter((f) => f.to !== o.id).reduce((s, f) => s + f.amount, 0));
+    amt.value = already ? already.amount : Math.max(0, Math.min(round2(o.amount - fundedOf(o)), left)).toFixed(2);
+    amt.focus();
+    amt.select();
+    return;
+  }
   if (e.target.name?.startsWith("fq-")) {
     e.target.closest(".lform").querySelector(".lterms").hidden = e.target.value !== "termly";
     return;
@@ -955,10 +1016,34 @@ document.addEventListener("click", async (e) => {
   if (t("[data-price-cancel]")) { pricing = null; return renderHome(); }
   if ((b = t("[data-month]"))) { budgetMonth = addMonths(budgetMonth, Number(b.dataset.month)); budgetEdit = null; return renderHome(); }
   if ((b = t("[data-month-copy]"))) {
-    const copy = monthLines(b.dataset.monthCopy).filter((l) => !isOneOff(l)).map((l, n) => ({ ...l, id: uid(), month: budgetMonth, position: Date.now() + n }));
+    const ids = new Map();
+    const copy = monthLines(b.dataset.monthCopy).filter((l) => !isOneOff(l)).map((l, n) => {
+      ids.set(l.id, uid());
+      return { ...l, id: ids.get(l.id), month: budgetMonth, position: Date.now() + n };
+    });
+    for (const l of copy) l.funds = (l.funds || []).filter((f) => ids.has(f.to)).map((f) => ({ ...f, to: ids.get(f.to) }));
     lines.push(...copy);
     renderHome();
     try { await store.addLines(copy); toast(`Copied ${copy.length} lines into ${monthLabel(budgetMonth)}`); } catch (err) { fail(err); await reload(); }
+    return;
+  }
+  if ((b = t("[data-fund-add]"))) {
+    const p = lines.find((l) => l.id === b.dataset.fundAdd), box = b.closest(".fdadd");
+    const to = box.querySelector(".fd-to").value, amount = toNum(box.querySelector(".fd-amt").value);
+    if (!to || amount == null) { box.querySelector(to ? ".fd-amt" : ".fd-to").focus(); return; }
+    p.funds = [...(p.funds || []).filter((f) => f.to !== to), { to, amount }];
+    renderHome();
+    try { await store.updateLine(p.id, { funds: p.funds }); } catch (err) { fail(err); await reload(); }
+    return;
+  }
+  if ((b = t("[data-fund-del]"))) {
+    const p = lines.find((l) => l.id === b.dataset.fundDel), before = p.funds;
+    p.funds = (p.funds || []).filter((f) => f.to !== b.dataset.fundTo);
+    renderHome();
+    try {
+      await store.updateLine(p.id, { funds: p.funds });
+      toast("Removed", { label: "Undo", run: async () => { p.funds = before; renderHome(); await store.updateLine(p.id, { funds: before }); } });
+    } catch (err) { fail(err); await reload(); }
     return;
   }
   if ((b = t("[data-line]"))) { budgetEdit = b.dataset.line; renderHome(); return focusLineForm(); }
@@ -1128,7 +1213,7 @@ document.addEventListener("submit", async (e) => {
         if (!shownLine(existing)) toast(`${name} is hidden because ${bgroupOf(existing).name} is set to Monthly only`);
         await store.updateLine(id, patch);
       } else {
-        const groupId = slot === "in" || slot === "out" ? null : slot;
+        const groupId = slotGroup(slot);
         const l = { id: uid(), householdId: household.id, month: budgetMonth, kind: slotKind(slot), name, amount, position: Date.now(),
           groupId, icon, frequency, startedOn, endsOn, remind, plan, note, terms };
         lines.push(l);
@@ -1723,17 +1808,19 @@ $("#exportBackup").onclick = async () => {
 
     const months = [...new Set(lines.map((l) => l.month))].sort().reverse();
     const summary = months.map((m) => {
-      const ls = monthLines(m), tin = sum(ls.filter((l) => l.kind === "in"));
+      const ls = monthLines(m), tin = sum(ls.filter(countedIn));
       const tout = sum(ls.filter(countedLine));
       return [monthLabel(m), tin, tout, Math.round((tin - tout) * 100) / 100];
     });
     X.utils.book_append_sheet(wb, sheet([["Month", "Coming in (£)", "Going out (£)", "Left over (£)"], ...summary], [16, 14, 14, 14]), "Budget by month");
     const budget = months.flatMap((m) => monthLines(m).sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "in" ? -1 : 1))
       .map((l) => [monthLabel(m), l.kind === "in" ? "Coming in" : "Going out", bgroupOf(l)?.name || "", l.name, l.amount,
-        isOneOff(l) ? "One-off" : isTermly(l) ? `Termly (${(l.terms || []).map((t) => gbp.format(t)).join(", ")})` : "Monthly", l.kind === "in" || countedLine(l) ? "Yes" : "No",
-        l.startedOn ? prettyDate(l.startedOn) : "", l.endsOn ? prettyDate(l.endsOn) : "", l.note || ""]));
-    X.utils.book_append_sheet(wb, sheet([["Month", "In or out", "Group", "What", "Amount (£)", "How often", "In the totals", "Started", "Expires", "Note"], ...budget],
-      [16, 11, 22, 24, 11, 11, 12, 13, 13, 40]), "Budget lines");
+        isOneOff(l) ? "One-off" : isTermly(l) ? `Termly (${(l.terms || []).map((t) => gbp.format(t)).join(", ")})` : "Monthly", countedIn(l) || countedLine(l) ? "Yes" : "No",
+        l.startedOn ? prettyDate(l.startedOn) : "", l.endsOn ? prettyDate(l.endsOn) : "", l.note || "",
+        l.kind === "in" ? fundsOf(l).map((f) => `${gbp.format(f.amount)} to ${lines.find((x) => x.id === f.to).name}`).join(", ")
+          : fundsInto(l).map((f) => `${gbp.format(f.amount)} from ${f.pot.name}`).join(", ")]));
+    X.utils.book_append_sheet(wb, sheet([["Month", "In or out", "Group", "What", "Amount (£)", "How often", "In the totals", "Started", "Expires", "Note", "Paid from / to"], ...budget],
+      [16, 11, 22, 24, 11, 11, 12, 13, 13, 40, 40]), "Budget lines");
     const spent = [...lines].sort((a, b) => a.month.localeCompare(b.month) || a.position - b.position)
       .flatMap((l) => spendsOf(l).map((s) => [monthLabel(l.month), l.name, s.place, s.amount, s.pending ? "Yes" : ""]));
     if (spent.length) X.utils.book_append_sheet(wb, sheet([["Month", "Budget", "Where", "Amount (£)", "Pending"], ...spent], [16, 22, 24, 11, 9]), "Spending");
@@ -1858,7 +1945,7 @@ async function reload() {
   budgetMonth ??= todayIso().slice(0, 8) + "01";
   if (!$("#home").hidden) {
     /* Syncing redraws the list, so keep anything half-typed in a spending row and where the cursor was. */
-    const typed = [...document.querySelectorAll(".spadd input")].map((i) => [i.id, i.type === "checkbox" ? i.checked : i.value]);
+    const typed = [...document.querySelectorAll(".spadd input, .fdadd select, .fdadd input")].map((i) => [i.id, i.type === "checkbox" ? i.checked : i.value]);
     const focused = document.activeElement?.id;
     renderHome();
     for (const [id, v] of typed) { const i = document.getElementById(id); if (i) i[i.type === "checkbox" ? "checked" : "value"] = v; }

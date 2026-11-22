@@ -27,10 +27,11 @@ const toLine = (r) => ({
   id: r.id, householdId: r.household_id, month: r.month, kind: r.kind, name: r.name, amount: Number(r.amount), position: r.position,
   groupId: r.group_id, icon: r.icon, frequency: r.frequency, startedOn: r.started_on, endsOn: r.ends_on, remind: r.remind,
   plan: (r.plan || []).map((s) => ({ ...s, amount: Number(s.amount) })), note: r.note, terms: (r.terms || []).map(Number),
+  funds: (r.funds || []).map((f) => ({ to: f.to, amount: Number(f.amount) })),
 });
 function lineRow(l) {
   const r = {};
-  for (const k of ["month", "kind", "name", "amount", "position", "icon", "frequency", "remind", "plan", "terms"]) if (k in l) r[k] = l[k];
+  for (const k of ["month", "kind", "name", "amount", "position", "icon", "frequency", "remind", "plan", "terms", "funds"]) if (k in l) r[k] = l[k];
   if ("groupId" in l) r.group_id = l.groupId || null;
   if ("startedOn" in l) r.started_on = l.startedOn || null;
   if ("note" in l) r.note = l.note || null;
