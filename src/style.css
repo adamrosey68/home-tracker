@@ -134,6 +134,32 @@ select { appearance: none; -webkit-appearance: none; background-image: linear-gr
 .aicon.bills { background: var(--a-bills-soft); color: var(--a-bills); }
 .aicon.car { background: var(--a-car-soft); color: var(--a-car); }
 .aicon.family { background: var(--a-family-soft); color: var(--a-family); }
+.aicon.savings { background: var(--ok-soft); color: var(--ok); }
+.savtotal { margin-left: auto; font-family: var(--font-display); font-weight: 700; font-size: 17px; color: var(--ok); font-variant-numeric: tabular-nums; }
+.savtotal + .caret { margin-left: 8px; }
+.savbal { font-family: var(--font-display); font-weight: 700; font-size: 20px; color: var(--ok); font-variant-numeric: tabular-nums; }
+.savbal.neg { color: var(--danger); }
+.savlist { display: grid; gap: 12px; max-width: 760px; }
+.savbody { padding: 10px 14px; display: grid; gap: 8px; }
+.savbody + .savbody { padding-top: 0; }
+.savacts { gap: 8px; }
+.savform, .mform { display: grid; gap: 8px; }
+.svstart, .mform { grid-template-columns: 1fr 1fr; }
+.svstart { display: grid; gap: 8px; }
+.svstart label, .mform > label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.mform .lfq, .mform .row, .mform > label:first-of-type { grid-column: 1 / -1; }
+.mform { padding: 8px 0; }
+.mlist { list-style: none; margin: 0; padding: 0; }
+.mlist li + li { border-top: 1px solid var(--line); }
+.mrow { width: 100%; min-height: 44px; padding: 8px 4px; border: 0; background: none; color: inherit; text-align: left; display: grid; grid-template-columns: 74px 1fr auto auto; gap: 10px; align-items: center; font-size: 14px; border-radius: 8px; }
+.mrow:hover { background: var(--bg); }
+.mdate { color: var(--muted); font-size: 13px; }
+.mwhat { min-width: 0; overflow-wrap: anywhere; }
+.mrow .mamt { font-weight: 600; font-variant-numeric: tabular-nums; }
+.mrow .mamt.in { color: var(--ok); }
+.mrow .mamt.out { color: var(--danger); }
+.mbal { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; min-width: 78px; text-align: right; }
+@media (max-width: 420px) { .mrow { grid-template-columns: 62px 1fr auto; } .mbal { display: none; } }
 .aicon.in { background: var(--ok-soft); color: var(--ok); }
 .aicon.plain { background: var(--bg); color: var(--muted); }
 

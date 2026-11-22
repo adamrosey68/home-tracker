@@ -3,6 +3,7 @@ export const AREAS = [
   { id: "bills", label: "Bills", icon: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"></path>' },
   { id: "car", label: "Car", icon: '<path d="M5 16.5h14M3.5 16.5V12l2.2-5h12.6l2.2 5v4.5"></path><path d="M3.5 12h17"></path><circle cx="7.5" cy="17" r="1.8"></circle><circle cx="16.5" cy="17" r="1.8"></circle>' },
   { id: "family", label: "Family", icon: '<path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"></path>' },
+  { id: "savings", label: "Savings", icon: '<path d="M19 9.5c1 .6 1.5 1.4 1.5 2.5v1.5H19a7 7 0 0 1-2 3V19h-3v-1.5h-4V19H7v-2.5A6.5 6.5 0 0 1 5 12c0-3.6 3.4-6 7.5-6 1.3 0 2.5.2 3.5.6L18.5 5v4.5z"></path><path d="M15.5 11h.01"></path>' },
 ];
 
 /* `freq` is the usual way it's paid, used as the default for new items. */

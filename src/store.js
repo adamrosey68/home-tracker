@@ -38,6 +38,17 @@ function lineRow(l) {
   return r;
 }
 const toSpend = (r) => ({ id: r.id, householdId: r.household_id, lineId: r.line_id, place: r.place, amount: Number(r.amount), pending: r.pending, position: r.position });
+const toAccount = (r) => ({ id: r.id, householdId: r.household_id, name: r.name, position: r.position });
+const toMove = (r) => ({
+  id: r.id, householdId: r.household_id, accountId: r.account_id, on: r.moved_on, kind: r.kind, amount: Number(r.amount), what: r.what,
+  created: Date.parse(r.created_at),
+});
+function moveRow(m) {
+  const r = {};
+  for (const k of ["kind", "amount", "what"]) if (k in m) r[k] = m[k];
+  if ("on" in m) r.moved_on = m.on;
+  return r;
+}
 const toBudgetGroup = (r) => ({ id: r.id, householdId: r.household_id, name: r.name, inTotal: r.in_total, monthlyOnly: r.monthly_only, position: r.position });
 function budgetGroupRow(g) {
   const r = {};
@@ -103,7 +114,7 @@ function cloud() {
     async people(hid) { return ok(await sb.rpc("household_people", { hid })); },
 
     async load(householdId) {
-      const [its, docs, gs, vs, ls, bgs, sps] = await Promise.all([
+      const [its, docs, gs, vs, ls, bgs, sps, acs, mvs] = await Promise.all([
         sb.from("items").select("*").eq("household_id", householdId).order("renewal_date", { nullsFirst: false }),
         sb.from("item_docs").select("id, item_id, path, name, mime, created_at").eq("household_id", householdId).order("created_at"),
         sb.from("item_groups").select("*").eq("household_id", householdId).order("position").order("created_at"),
@@ -111,12 +122,21 @@ function cloud() {
         sb.from("budget_lines").select("*").eq("household_id", householdId).order("position").order("created_at"),
         sb.from("budget_groups").select("*").eq("household_id", householdId).order("position").order("created_at"),
         sb.from("budget_spends").select("*").eq("household_id", householdId).order("position").order("created_at"),
+        sb.from("savings_accounts").select("*").eq("household_id", householdId).order("position").order("created_at"),
+        sb.from("savings_moves").select("*").eq("household_id", householdId).order("moved_on").order("created_at"),
       ]).then((rs) => rs.map(ok));
       const items = its.map(toItem);
       const index = new Map(items.map((i) => [i.id, i]));
       for (const d of docs) index.get(d.item_id)?.docs.push(toDoc(d));
-      return { items, groups: gs.map(toGroup), vehicles: vs.map(toVehicle), lines: ls.map(toLine), budgetGroups: bgs.map(toBudgetGroup), spends: sps.map(toSpend) };
+      return { items, groups: gs.map(toGroup), vehicles: vs.map(toVehicle), lines: ls.map(toLine), budgetGroups: bgs.map(toBudgetGroup), spends: sps.map(toSpend),
+        accounts: acs.map(toAccount), moves: mvs.map(toMove) };
     },
+    async addAccount(a) { ok(await sb.from("savings_accounts").insert({ id: a.id, household_id: a.householdId, name: a.name, position: a.position })); },
+    async updateAccount(id, patch) { ok(await sb.from("savings_accounts").update(patch).eq("id", id)); },
+    async deleteAccount(id) { ok(await sb.from("savings_accounts").delete().eq("id", id)); },
+    async addMove(m) { ok(await sb.from("savings_moves").insert({ id: m.id, household_id: m.householdId, account_id: m.accountId, ...moveRow(m) })); },
+    async updateMove(id, patch) { ok(await sb.from("savings_moves").update(moveRow(patch)).eq("id", id)); },
+    async deleteMove(id) { ok(await sb.from("savings_moves").delete().eq("id", id)); },
     async addSpend(s) {
       ok(await sb.from("budget_spends").insert({ id: s.id, household_id: s.householdId, line_id: s.lineId, place: s.place, amount: s.amount, pending: s.pending, position: s.position }));
     },
@@ -178,7 +198,7 @@ function cloud() {
     subscribe(onChange) {
       if (channel) return;
       channel = sb.channel("sync");
-      for (const table of ["items", "item_docs", "item_groups", "vehicles", "budget_lines", "budget_groups", "budget_spends", "household_members"]) {
+      for (const table of ["items", "item_docs", "item_groups", "vehicles", "budget_lines", "budget_groups", "budget_spends", "savings_accounts", "savings_moves", "household_members"]) {
         channel.on("postgres_changes", { event: "*", schema: "public", table }, onChange);
       }
       channel.subscribe();
@@ -190,8 +210,9 @@ function cloud() {
 function local() {
   const KEY = "home-tracker-demo";
   const read = () => {
-    try { return { name: "Our home", items: [], docs: [], groups: [], vehicles: [], lines: [], budgetGroups: [], spends: [], ...JSON.parse(localStorage.getItem(KEY)) }; }
-    catch { return { name: "Our home", items: [], docs: [], groups: [], vehicles: [], lines: [], budgetGroups: [], spends: [] }; }
+    const empty = { name: "Our home", items: [], docs: [], groups: [], vehicles: [], lines: [], budgetGroups: [], spends: [], accounts: [], moves: [] };
+    try { return { ...empty, ...JSON.parse(localStorage.getItem(KEY)) }; }
+    catch { return empty; }
   };
   const edit = (fn) => { const d = read(); fn(d); localStorage.setItem(KEY, JSON.stringify(d)); };
   const user = { id: "local", email: null };
@@ -214,8 +235,15 @@ function local() {
     async load() {
       const d = read();
       const items = d.items.map((it) => ({ ...it, docs: d.docs.filter((x) => x.itemId === it.id).map(({ itemId, ...x }) => x) }));
-      return { items, groups: d.groups.slice().sort((a, b) => a.position - b.position), vehicles: d.vehicles.slice(), lines: d.lines.slice(), budgetGroups: d.budgetGroups.slice().sort((a, b) => a.position - b.position), spends: d.spends.slice() };
+      return { items, groups: d.groups.slice().sort((a, b) => a.position - b.position), vehicles: d.vehicles.slice(), lines: d.lines.slice(), budgetGroups: d.budgetGroups.slice().sort((a, b) => a.position - b.position), spends: d.spends.slice(),
+        accounts: d.accounts.slice().sort((a, b) => a.position - b.position), moves: d.moves.slice() };
     },
+    async addAccount(a) { edit((d) => d.accounts.push({ ...a })); },
+    async updateAccount(id, patch) { edit((d) => Object.assign(d.accounts.find((a) => a.id === id) || {}, patch)); },
+    async deleteAccount(id) { edit((d) => { d.accounts = d.accounts.filter((a) => a.id !== id); d.moves = d.moves.filter((m) => m.accountId !== id); }); },
+    async addMove(m) { edit((d) => d.moves.push({ ...m })); },
+    async updateMove(id, patch) { edit((d) => Object.assign(d.moves.find((m) => m.id === id) || {}, patch)); },
+    async deleteMove(id) { edit((d) => { d.moves = d.moves.filter((m) => m.id !== id); }); },
     async addSpend(s) { edit((d) => d.spends.push({ ...s })); },
     async updateSpend(id, patch) { edit((d) => Object.assign(d.spends.find((s) => s.id === id) || {}, patch)); },
     async deleteSpend(id) { edit((d) => { d.spends = d.spends.filter((s) => s.id !== id); }); },

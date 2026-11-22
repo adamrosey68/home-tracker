@@ -32,6 +32,9 @@ const openVehicleDetails = new Set();
 let lines = [];
 let budgetGroups = [];
 let spends = [];
+let accounts = [], moves = [];
+let savEdit = null, savDeleteArmed = false, moveEdit = null;
+const savShowAll = new Set();
 let budgetMonth = null;
 /* Which budget line form is open: a line id, "new-in", "new-out" or "new-<groupId>". */
 let budgetEdit = null;
@@ -596,7 +599,107 @@ function budgetCard() {
   </section>`;
 }
 
+/* ---------- Savings ---------- */
+
+const pounds = (n) => esc(gbp.format(n));
+const signed = (m) => (m.kind === "in" ? m.amount : -m.amount);
+const movesOf = (acc) => moves.filter((m) => m.accountId === acc.id)
+  .sort((a, b) => a.on.localeCompare(b.on) || (a.created || 0) - (b.created || 0));
+const balanceOf = (acc) => Math.round(movesOf(acc).reduce((s, m) => s + signed(m), 0) * 100) / 100;
+
+function accountForm(acc) {
+  const id = acc ? acc.id : "new";
+  return `<form class="savform" data-sav-form="${id}">
+    <label class="sr" for="sv-name-${id}">Account name</label>
+    <input type="text" id="sv-name-${id}" class="svname" maxlength="60" placeholder="e.g. Nationwide ISA" value="${esc(acc?.name)}" autocomplete="off" required>
+    ${acc ? "" : `<div class="svstart">
+      <label>Money in it now (£)<input type="number" class="svamt" inputmode="decimal" min="0" step="0.01" placeholder="0.00"></label>
+      <label>As of<input type="date" class="svdate" value="${todayIso()}"></label>
+    </div>`}
+    <div class="row">
+      <button class="btn primary" type="submit">${acc ? "Save" : "Add account"}</button>
+      ${acc ? `<button class="btn danger${savDeleteArmed ? " confirm" : ""}" type="button" data-sav-delete="${acc.id}">${savDeleteArmed
+        ? `Tap again to delete it and its ${movesOf(acc).length} entries` : "Delete account"}</button>` : ""}
+      <button class="btn quiet" type="button" data-sav-cancel>Cancel</button>
+    </div>
+  </form>`;
+}
+function moveForm(acc, m, kind) {
+  const id = m ? m.id : `new-${kind}-${acc.id}`;
+  const k = m ? m.kind : kind;
+  return `<form class="mform" data-move-form="${id}" data-acc="${acc.id}">
+    <div class="lfq" role="radiogroup" aria-label="In or out">
+      <label><input type="radio" name="mk-${id}" value="in"${k === "in" ? " checked" : ""}> Paid in</label>
+      <label><input type="radio" name="mk-${id}" value="out"${k === "out" ? " checked" : ""}> Taken out</label>
+    </div>
+    <label>What for<input type="text" class="mwhat" maxlength="120" placeholder="${k === "in" ? "e.g. Monthly saving" : "e.g. Holiday deposit"}" value="${esc(m?.what)}" autocomplete="off"></label>
+    <label>Amount (£)<input type="number" class="mamt" inputmode="decimal" min="0" step="0.01" value="${m ? m.amount : ""}" required></label>
+    <label>When<input type="date" class="mdate" value="${m ? m.on : todayIso()}" required></label>
+    <div class="row">
+      <button class="btn primary" type="submit">${m ? "Save" : "Add"}</button>
+      ${m ? `<button class="btn danger" type="button" data-move-delete="${m.id}">Delete</button>` : ""}
+      <button class="btn quiet" type="button" data-move-cancel>Cancel</button>
+    </div>
+  </form>`;
+}
+function accountCard(acc) {
+  const ms = movesOf(acc);
+  let run = 0;
+  const rows = ms.map((m) => ({ m, bal: (run = Math.round((run + signed(m)) * 100) / 100) })).reverse();
+  const all = savShowAll.has(acc.id), shown = all ? rows : rows.slice(0, 8);
+  const bal = balanceOf(acc);
+  const newKind = moveEdit?.startsWith("new-") && moveEdit.endsWith(acc.id) ? moveEdit.split("-")[1] : null;
+  const month = todayIso().slice(0, 7);
+  const tm = ms.filter((m) => m.on.startsWith(month) && m.what !== "Starting balance");
+  const net = Math.round(tm.reduce((s, m) => s + signed(m), 0) * 100) / 100;
+  return `<section class="pcard savacc">
+    <div class="phdr">
+      <span class="pname">${esc(acc.name)}</span>
+      <span class="savbal${bal < 0 ? " neg" : ""}">${pounds(bal)}</span>
+      <button class="gbtn" type="button" data-sav-edit="${acc.id}" aria-label="Rename or delete ${esc(acc.name)}">⋯</button>
+    </div>
+    ${savEdit === acc.id ? `<div class="savbody">${accountForm(acc)}</div>` : ""}
+    <div class="savbody">
+      ${tm.length ? `<p class="note">This month: ${net >= 0 ? "+" : "−"}${pounds(Math.abs(net))} (${tm.length} entr${tm.length === 1 ? "y" : "ies"})</p>` : ""}
+      <div class="row savacts">
+        <button class="btn" type="button" data-move-new="in" data-acc="${acc.id}">+ Paid in</button>
+        <button class="btn" type="button" data-move-new="out" data-acc="${acc.id}">− Taken out</button>
+      </div>
+      ${newKind ? moveForm(acc, null, newKind) : ""}
+      ${rows.length ? `<ul class="mlist">${shown.map(({ m, bal: b }) => moveEdit === m.id ? `<li>${moveForm(acc, m)}</li>`
+        : `<li><button type="button" class="mrow" data-move="${m.id}">
+            <span class="mdate">${prettyDate(m.on, m.on.slice(0, 4) !== todayIso().slice(0, 4))}</span>
+            <span class="mwhat">${esc(m.what || (m.kind === "in" ? "Paid in" : "Taken out"))}</span>
+            <span class="mamt ${m.kind}">${m.kind === "in" ? "+" : "−"}${pounds(m.amount)}</span>
+            <span class="mbal">${pounds(b)}</span>
+          </button></li>`).join("")}</ul>
+        ${rows.length > 8 ? `<button class="btn quiet" type="button" data-sav-all="${acc.id}">${all ? "Show fewer" : `Show all ${rows.length}`}</button>` : ""}`
+        : `<p class="empty">Nothing recorded yet.</p>`}
+    </div>
+  </section>`;
+}
+function savingsSection(a) {
+  const shown = q() ? accounts.filter((x) => x.name.toLowerCase().includes(q().toLowerCase())) : accounts;
+  if (q() && !shown.length) return "";
+  const shut = closedAreas.has(a.id) && !q() && savEdit !== "new";
+  const total = Math.round(accounts.reduce((s, x) => s + balanceOf(x), 0) * 100) / 100;
+  return `<section class="area">
+    <div class="ahead">
+      <button class="atoggle" type="button" data-area-toggle="${a.id}" aria-expanded="${!shut}">
+        <span class="aicon ${a.id}">${svg(a.icon)}</span><h2>${esc(a.label)}</h2>
+        ${accounts.length ? `<span class="savtotal">${pounds(total)}</span>` : ""}<span class="caret">${shut ? "▸" : "▾"}</span>
+      </button>
+      <button class="btn quiet" type="button" data-sav-new>+ Account</button></div>
+    ${shut ? "" : `<div class="savlist">
+      ${savEdit === "new" ? `<section class="pcard savnew"><div class="savbody">${accountForm(null)}</div></section>` : ""}
+      ${shown.map(accountCard).join("")}
+      ${!accounts.length && savEdit !== "new" ? `<p class="empty">No savings yet. Tap “+ Account” to add one, with how much is in it now.</p>` : ""}
+    </div>`}
+  </section>`;
+}
+
 function areaSection(a) {
+  if (a.id === "savings") return savingsSection(a);
   const all = groups.filter((g) => g.area === a.id);
   const vs = a.id === "car" ? vehicles : [];
   const vBlocks = vs.map((v) => {
@@ -651,12 +754,12 @@ function renderHome() {
   renderTotals();
   renderComing();
   const count = (id) => groups.filter((g) => g.area === id).length + items.filter((i) => !i.groupId && !i.archivedAt && areaIdOf(i) === id).length
-    + (id === "car" ? vehicles.length : 0) + (id === "bills" && monthLines(budgetMonth).length ? 1 : 0);
+    + (id === "car" ? vehicles.length : 0) + (id === "bills" && monthLines(budgetMonth).length ? 1 : 0) + (id === "savings" ? accounts.length : 0);
   $("#areaChips").innerHTML = [{ id: "all", label: "All" }, ...AREAS].map((a) => {
     const n = a.id === "all" ? AREAS.reduce((s, x) => s + count(x.id), 0) : count(a.id);
     return `<button type="button" class="chip" data-area="${a.id}" aria-pressed="${filter.area === a.id}">${esc(a.label)} <span class="cnt">${n}</span></button>`;
   }).join("");
-  const anything = items.length || groups.length || vehicles.length || lines.length || newGroupArea;
+  const anything = items.length || groups.length || vehicles.length || lines.length || accounts.length || newGroupArea || savEdit;
   $(".filters").hidden = !anything;
   $("#list").innerHTML = anything
     ? AREAS.filter((a) => filter.area === "all" || filter.area === a.id).map(areaSection).join("") || `<p class="empty">Nothing matches that search.</p>`
@@ -724,6 +827,42 @@ document.addEventListener("click", async (e) => {
     const from = last ? addMonths(last.to, 1) : b.closest("form").querySelector(".lstart").value || todayIso();
     box.querySelector(".pstages").insertAdjacentHTML("beforeend", planStage({ from }));
     box.querySelector(".pstage:last-child .pto").focus();
+    return;
+  }
+  if ((b = t("[data-sav-new]"))) { savEdit = "new"; savDeleteArmed = false; renderHome(); $(".savform .svname")?.focus(); return; }
+  if ((b = t("[data-sav-edit]"))) { savEdit = savEdit === b.dataset.savEdit ? null : b.dataset.savEdit; savDeleteArmed = false; return renderHome(); }
+  if ((b = t("[data-sav-cancel]"))) { savEdit = null; savDeleteArmed = false; return renderHome(); }
+  if ((b = t("[data-sav-all]"))) { toggle(savShowAll, b.dataset.savAll); return renderHome(); }
+  if ((b = t("[data-sav-delete]"))) {
+    if (!savDeleteArmed) { savDeleteArmed = true; return renderHome(); }
+    const id = b.dataset.savDelete;
+    accounts = accounts.filter((a) => a.id !== id);
+    moves = moves.filter((m) => m.accountId !== id);
+    savEdit = null; savDeleteArmed = false;
+    renderHome();
+    try { await store.deleteAccount(id); } catch (err) { fail(err); await reload(); }
+    return;
+  }
+  if ((b = t("[data-move-new]"))) {
+    moveEdit = `new-${b.dataset.moveNew}-${b.dataset.acc}`;
+    renderHome();
+    $(`[data-move-form="${moveEdit}"] .mwhat`)?.focus();
+    return;
+  }
+  if ((b = t("[data-move]"))) { moveEdit = b.dataset.move; return renderHome(); }
+  if ((b = t("[data-move-cancel]"))) { moveEdit = null; return renderHome(); }
+  if ((b = t("[data-move-delete]"))) {
+    const m = moves.find((x) => x.id === b.dataset.moveDelete);
+    moves = moves.filter((x) => x !== m);
+    moveEdit = null;
+    renderHome();
+    try {
+      await store.deleteMove(m.id);
+      toast("Entry deleted", { label: "Undo", run: async () => {
+        moves.push(m); renderHome();
+        try { await store.addMove(m); } catch (err) { fail(err); await reload(); }
+      } });
+    } catch (err) { fail(err); await reload(); }
     return;
   }
   if ((b = t("[data-spend-add]"))) return addSpend(b.dataset.spendAdd);
@@ -840,6 +979,60 @@ document.addEventListener("click", async (e) => {
 });
 
 document.addEventListener("submit", async (e) => {
+  const sf = e.target.closest("[data-sav-form]");
+  if (sf) {
+    e.preventDefault();
+    const name = sf.querySelector(".svname").value.trim();
+    if (!name) return;
+    const id = sf.dataset.savForm;
+    savEdit = null;
+    savDeleteArmed = false;
+    try {
+      if (id === "new") {
+        const acc = { id: uid(), householdId: household.id, name, position: Date.now() };
+        const start = toNum(sf.querySelector(".svamt").value);
+        accounts.push(acc);
+        closedAreas.delete("savings"); saveUi();
+        const m = start ? { id: uid(), householdId: household.id, accountId: acc.id, on: sf.querySelector(".svdate").value || todayIso(), kind: "in",
+          amount: start, what: "Starting balance", created: Date.now() } : null;
+        if (m) moves.push(m);
+        renderHome();
+        await store.addAccount(acc);
+        if (m) await store.addMove(m);
+      } else {
+        accounts.find((a) => a.id === id).name = name;
+        renderHome();
+        await store.updateAccount(id, { name });
+      }
+    } catch (err) { fail(err); await reload(); }
+    return;
+  }
+  const mf = e.target.closest("[data-move-form]");
+  if (mf) {
+    e.preventDefault();
+    const id = mf.dataset.moveForm, amount = toNum(mf.querySelector(".mamt").value);
+    if (amount == null) return;
+    const patch = {
+      kind: mf.querySelector(`input[name="mk-${id}"]:checked`).value, amount,
+      what: mf.querySelector(".mwhat").value.trim() || null, on: mf.querySelector(".mdate").value || todayIso(),
+    };
+    moveEdit = null;
+    try {
+      const existing = moves.find((m) => m.id === id);
+      if (existing) {
+        Object.assign(existing, patch);
+        renderHome();
+        await store.updateMove(id, patch);
+      } else {
+        const m = { id: uid(), householdId: household.id, accountId: mf.dataset.acc, created: Date.now(), ...patch };
+        moves.push(m);
+        renderHome();
+        toast(`${patch.kind === "in" ? "Paid in" : "Taken out"} ${gbp.format(amount)}`);
+        await store.addMove(m);
+      }
+    } catch (err) { fail(err); await reload(); }
+    return;
+  }
   const lf = e.target.closest("[data-line-form]");
   if (lf) {
     e.preventDefault();
@@ -1033,7 +1226,7 @@ $("#vDelete").onclick = async () => {
 
 /* ---------- Item sheet ---------- */
 
-$("#fCategory").innerHTML = AREAS.map((a) => `<optgroup label="${esc(a.label)}">${CATEGORIES.filter((c) => c.area === a.id)
+$("#fCategory").innerHTML = AREAS.filter((a) => CATEGORIES.some((c) => c.area === a.id)).map((a) => `<optgroup label="${esc(a.label)}">${CATEGORIES.filter((c) => c.area === a.id)
   .map((c) => `<option value="${c.id}">${esc(c.label)}</option>`).join("")}</optgroup>`).join("");
 $("#fFreq").innerHTML = FREQUENCIES.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
 
@@ -1475,6 +1668,9 @@ $("#exportBackup").onclick = async () => {
     const spent = [...lines].sort((a, b) => a.month.localeCompare(b.month) || a.position - b.position)
       .flatMap((l) => spendsOf(l).map((s) => [monthLabel(l.month), l.name, s.place, s.amount, s.pending ? "Yes" : ""]));
     if (spent.length) X.utils.book_append_sheet(wb, sheet([["Month", "Budget", "Where", "Amount (£)", "Pending"], ...spent], [16, 22, 24, 11, 9]), "Spending");
+    const saved = accounts.flatMap((acc) => { let run = 0; return movesOf(acc).map((m) => [acc.name, uk(m.on), m.kind === "in" ? "Paid in" : "Taken out",
+      m.what || "", signed(m), (run = Math.round((run + signed(m)) * 100) / 100)]); });
+    if (saved.length) X.utils.book_append_sheet(wb, sheet([["Account", "Date", "In or out", "What for", "Amount (£)", "Balance (£)"], ...saved], [22, 12, 11, 30, 11, 12]), "Savings");
 
     const vrows = vehicles.flatMap((v) => [
       ...[["Registration", v.registration], ["Make", v.make], ["Model", v.model], ["Nickname", v.nickname]].filter(([, x]) => x),
@@ -1589,7 +1785,7 @@ $("#authForm").addEventListener("submit", async (e) => {
 
 async function reload() {
   household = await store.household();
-  ({ items, groups, vehicles, lines, budgetGroups, spends } = await store.load(household.id));
+  ({ items, groups, vehicles, lines, budgetGroups, spends, accounts, moves } = await store.load(household.id));
   budgetMonth ??= todayIso().slice(0, 8) + "01";
   if (!$("#home").hidden) {
     /* Syncing redraws the list, so keep anything half-typed in a spending row and where the cursor was. */
