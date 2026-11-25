@@ -336,8 +336,12 @@ ul { list-style: none; margin: 0; padding: 0; }
 .ldates .tick { font-size: 14px; }
 .ladd { align-self: flex-start; margin-left: -8px; color: var(--accent); font-weight: 600; }
 .bghead { display: flex; align-items: center; gap: 8px; min-height: 32px; }
-.bghead h3 { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.bghead h3 { flex: 1; min-width: 0; overflow-wrap: anywhere; margin: 0; }
 .bghead .gbtn { margin-right: -8px; }
+.bgtoggle { flex: 1; min-width: 0; min-height: 36px; padding: 0; border: 0; background: none; color: inherit; text-align: left; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.bgtoggle .caret { width: 14px; flex: none; font-size: 13px; color: var(--muted); }
+.bgroup.shut { padding-bottom: 8px; }
+.bgroup.shut .bghead { border-bottom: 0; }
 .bgsum { font-family: var(--font-display); font-weight: 700; font-size: 16px; font-variant-numeric: tabular-nums; }
 .bgsum.in { color: var(--ok); }
 .bgroup { background: color-mix(in srgb, var(--a-bills-soft) 35%, transparent); }

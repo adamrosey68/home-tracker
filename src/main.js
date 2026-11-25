@@ -50,7 +50,8 @@ const UI_KEY = "home-tracker-ui";
 const ui = (() => { try { return JSON.parse(localStorage.getItem(UI_KEY)) || {}; } catch { return {}; } })();
 const openGroups = new Set(ui.openGroups || []);
 const closedAreas = new Set(ui.closedAreas || []);
-const saveUi = () => localStorage.setItem(UI_KEY, JSON.stringify({ openGroups: [...openGroups], closedAreas: [...closedAreas] }));
+const closedBudgetGroups = new Set(ui.closedBudgetGroups || []);
+const saveUi = () => localStorage.setItem(UI_KEY, JSON.stringify({ openGroups: [...openGroups], closedAreas: [...closedAreas], closedBudgetGroups: [...closedBudgetGroups] }));
 const toggle = (set, id) => { if (set.has(id)) set.delete(id); else set.add(id); saveUi(); };
 let importRows = null, importMap = {};
 
@@ -633,13 +634,18 @@ function bgroupForm(g) {
 }
 function bgroupSect(g, all, pots) {
   const gl = all.filter(shownLine), hidden = all.filter((l) => !shownLine(l));
-  return `<div class="bsect bgroup${g.inTotal ? "" : " off"}">
+  const editing = bgroupEdit === g.id;
+  const expanded = !closedBudgetGroups.has(g.id) || editing;
+  return `<div class="bsect bgroup${g.inTotal ? "" : " off"}${expanded ? "" : " shut"}">
     <div class="bghead">
-      <h3>${esc(g.name)} <span class="cnt">${gl.length}</span></h3>
+      <button class="bgtoggle" type="button" data-bgroup-toggle="${g.id}" aria-expanded="${expanded}">
+        <span class="caret">${expanded ? "▾" : "▸"}</span>
+        <h3>${esc(g.name)} <span class="cnt">${gl.length}</span></h3>
+      </button>
       <span class="bgsum">${esc(gbp.format(sum(gl)))}</span>
       <button class="gbtn" type="button" data-bgroup-edit="${g.id}" aria-label="Rename or delete ${esc(g.name)}">⋯</button>
     </div>
-    ${bgroupEdit === g.id ? bgroupForm(g) : ""}
+    ${expanded ? `${editing ? bgroupForm(g) : ""}
     <div class="bgticks">
       <label class="tick bgtick"><input type="checkbox" data-bgroup-total="${g.id}"${g.inTotal ? " checked" : ""}> Count in the totals</label>
       <label class="tick bgtick"><input type="checkbox" data-bgroup-monthly="${g.id}"${g.monthlyOnly ? " checked" : ""}> Monthly only</label>
@@ -647,7 +653,7 @@ function bgroupSect(g, all, pots) {
     ${gl.some((l) => yearlyOf(l) != null) ? `<p class="bgyear">Regular items come to <b>${esc(gbp.format(Math.round(gl.reduce((s, l) => s + (yearlyOf(l) ?? 0), 0) * 100) / 100))}</b> a year</p>` : ""}
     ${hidden.length ? `<div class="bghidden"><p>${hidden.length} one-off${hidden.length === 1 ? "" : "s"} hidden (${esc(gbp.format(sum(hidden)))}), not in the totals:</p><ul>${hidden.map((l) => `<li><span>${esc(l.name)}</span><span>${esc(gbp.format(l.amount))}</span></li>`).join("")}</ul></div>` : ""}
     ${pots.length || budgetEdit === `new-pot-${g.id}` ? `<h4 class="bgsub">Coming in</h4>${potList(g, pots, gl)}<h4 class="bgsub">Going out</h4>${lineList(g.id, gl)}`
-      : `${lineList(g.id, gl)}${potList(g, pots, gl)}`}
+      : `${lineList(g.id, gl)}${potList(g, pots, gl)}`}` : ""}
   </div>`;
 }
 function budgetCard() {
@@ -1191,6 +1197,7 @@ document.addEventListener("click", async (e) => {
   }
   if ((b = t("[data-group-toggle]"))) { toggle(openGroups, b.dataset.groupToggle); return renderHome(); }
   if ((b = t("[data-area-toggle]"))) { toggle(closedAreas, b.dataset.areaToggle); return renderHome(); }
+  if ((b = t("[data-bgroup-toggle]"))) { toggle(closedBudgetGroups, b.dataset.bgroupToggle); return renderHome(); }
   if ((b = t("[data-history]"))) {
     const id = b.dataset.history;
     if (openHistory.has(id)) openHistory.delete(id); else openHistory.add(id);
