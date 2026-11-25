@@ -1,0 +1,60 @@
+---
+description: Full project context — architecture, deployment, database, features, and conventions for the Home Tracker app
+alwaysApply: true
+---
+
+# Home Tracker — Project Context
+
+Household PWA for Adam and Vikki: renewals (insurance, MOT, bills), the car, a monthly budget, savings, keys and documents. Works as an iPhone home-screen app and on laptop. Both people share one household and see the same data, synced instantly. The user is not a developer: explain things in plain English.
+
+## Tech Stack
+
+- **Frontend:** Vite vanilla JS PWA (`index.html`, `src/main.js`, `src/store.js`, `src/categories.js`, `src/style.css`). No framework, plain template strings and DOM.
+- **Backend/DB:** Supabase project ref `zewsuujbdihswziuwovs`. Postgres with RLS, Realtime, one Edge Function, private storage bucket `home-docs` (paths start with the household id).
+- **Hosting:** Cloudflare Pages project `home-tracker` at `https://home-tracker-ahg.pages.dev`.
+- **Service worker:** `public/sw.js`, network-first, so a new deploy shows on the next open.
+- **Sibling app:** Holiday Tracker (`cruise-tracker` folder, separate repo) uses the same Supabase project and household (`cruise_*`/`holiday` tables, migrations 005–008 here).
+
+## Key Commands (PowerShell; chain with `;`)
+
+```
+npm run deploy                                   # build + publish to Cloudflare Pages
+npx vite --port 5190 --strictPort --mode demo    # local test copy, data in localStorage "home-tracker-demo"
+$pw = (Get-Content supabase\.env) -replace '^SUPABASE_DB_PASSWORD=',''; npx supabase db push --remote -p $pw --yes   # apply new migrations
+npx supabase db query --remote --read-only "<sql>"                                                                  # read-only query
+npx supabase functions deploy send-reminders --no-verify-jwt --use-api --yes
+```
+
+These need the laptop's logins and the gitignored `supabase/.env` and `.env.local`. A cloud agent does not have them, so from the cloud: change code, test in demo mode, commit and push, and tell the user to deploy / apply migrations from the laptop (or ask Cursor on the laptop to do it).
+
+## Database (migrations 001–020 in `supabase/migrations/`)
+
+- **households, household_members:** sharing. `is_member(household_id)` gates every RLS policy. `create_share_code`, `join_household`, `household_people(hid)` (emails of members) are security definer RPCs.
+- **items, item_groups, item_docs:** renewals in areas Home / Bills / Car / Family, with past providers, renewal and reminder dates, documents.
+- **vehicles:** the car's details; item_groups can belong to a vehicle.
+- **budget_groups:** e.g. "Vikki Out", with `in_total` and `monthly_only` ticks.
+- **budget_lines:** one row per month per line (`month` = 1st of month). `kind` in/out, `group_id`, `frequency` monthly / termly / one-off, `terms` (up to 4 term prices), `paid_terms` (which terms are paid that month; a termly line's `amount` = those terms, else 0), `started_on`/`ends_on`/`remind`/`reminded`, `plan` (payment plan stages), `note`, `funds` (on an "in" line inside a group, like DLA: `[{to: line id, amount}]` it pays towards).
+- **budget_spends:** spending against a line (e.g. Food), with pending flag.
+- **savings_accounts, savings_moves:** balance = sum of dated in/out moves.
+- **house_keys:** name, `holders` text[], note, `photo` (storage path under `<household>/keys/`).
+- **push_subscriptions:** web push (shared with Holiday Tracker, tagged per app).
+
+Copying a month copies non-one-off lines, remaps `funds` ids, and resets termly lines to nothing paid.
+
+## Edge Function
+
+`supabase/functions/send-reminders`: run hourly by pg_cron, sends between 9am and 9pm UK time. Renewal reminders, budget line expiry reminders (a month before), Holiday Tracker reminders. VAPID keys are Supabase secrets.
+
+## App Architecture
+
+- `store.js`: `cloud()` (Supabase) or `local()` (demo mode, localStorage). Row mappers `toLine`/`lineRow` etc. convert snake_case columns to camelCase.
+- `main.js`: global state arrays (`items`, `groups`, `lines`, `budgetGroups`, `spends`, `accounts`, `moves`, `keys`…), `renderHome()` redraws `#list`, one delegated click / change / input / submit listener each on `#list`. Realtime changes call `reload()`, which keeps half-typed inputs.
+- Areas come from `AREAS` in `categories.js`; Savings and the Keys card (in Home) are special sections. The budget card lives in Bills.
+- Excel backup (Settings) builds sheets with SheetJS: renewals, budget by month, budget lines, spending, savings, keys.
+
+## Conventions
+
+- Match existing style: small helpers, template strings, `esc()` on all user text, `gbp.format()` for money, `toast()` for messages, two taps to delete.
+- Every new table: RLS with `is_member(household_id)` and add to the realtime publication and to `subscribe()` in store.js.
+- Test changes in demo mode, including a narrow phone width (Vikki has an iPhone 15, 393px wide; check 330px too).
+- Never commit `.env.local`, `supabase/.env`, `supabase/secrets.env`. Never expose service_role keys or type passwords for the user. Get consent before changing real data, and say what changed.
