@@ -657,17 +657,40 @@ function bgroupForm(g) {
     </div>
   </form>`;
 }
+/* For a group with money in (like DLA): total outgoings, how much that covers, and what's left to find. */
+function potCovered(pots) {
+  return round2(pots.reduce((s, p) => s + fundsOf(p).reduce((n, f) => n + f.amount, 0), 0));
+}
+function groupPotSummary(outs, pots) {
+  if (!pots.length) return null;
+  const going = sum(outs), covered = potCovered(pots), after = round2(going - covered);
+  const potIn = sum(pots), potLeft = round2(potIn - covered);
+  const potNames = pots.map((p) => p.name).join(" / ");
+  return { going, covered, after, potIn, potLeft, potNames };
+}
+function potSummaryBox(s) {
+  return `<div class="bgpotsum">
+    <div><span class="blabel">Going out</span><span class="bnum">${esc(gbp.format(s.going))}</span></div>
+    <div><span class="blabel">Covered by ${esc(s.potNames)}</span><span class="bnum in">− ${esc(gbp.format(s.covered))}</span></div>
+    <div class="bgafter"><span class="blabel">Left after ${esc(s.potNames)}</span><span class="bnum ${s.after < 0 ? "in" : ""}">${esc(gbp.format(s.after))}</span></div>
+    ${s.potLeft > 0 ? `<p class="note">${esc(s.potNames)} is ${esc(gbp.format(s.potIn))} · ${esc(gbp.format(s.potLeft))} not linked to an outgoing yet</p>`
+      : s.potLeft < 0 ? `<p class="note">${esc(s.potNames)} is ${esc(gbp.format(s.potIn))} · ${esc(gbp.format(-s.potLeft))} more linked than comes in</p>`
+      : `<p class="note">${esc(s.potNames)} is ${esc(gbp.format(s.potIn))} · all of it is linked to outgoings</p>`}
+  </div>`;
+}
 function bgroupSect(g, all, pots) {
   const gl = all.filter(shownLine), hidden = all.filter((l) => !shownLine(l));
   const editing = bgroupEdit === g.id;
   const expanded = !closedBudgetGroups.has(g.id) || editing;
+  const potSum = groupPotSummary(gl, pots);
+  const headSum = potSum ? potSum.after : sum(gl);
   return `<div class="bsect bgroup${g.inTotal ? "" : " off"}${expanded ? "" : " shut"}">
     <div class="bghead">
       <button class="bgtoggle" type="button" data-bgroup-toggle="${g.id}" aria-expanded="${expanded}">
         <span class="caret">${expanded ? "▾" : "▸"}</span>
         <h3>${esc(g.name)} <span class="cnt">${gl.length}</span></h3>
       </button>
-      <span class="bgsum">${esc(gbp.format(sum(gl)))}</span>
+      <span class="bgsum${potSum ? " after" : ""}" title="${potSum ? `Left after ${potSum.potNames}` : ""}">${esc(gbp.format(headSum))}${potSum ? `<span class="bgsumhint">after ${esc(potSum.potNames)}</span>` : ""}</span>
       <button class="gbtn" type="button" data-bgroup-edit="${g.id}" aria-label="Rename or delete ${esc(g.name)}">⋯</button>
     </div>
     ${expanded ? `${editing ? bgroupForm(g) : ""}
@@ -675,7 +698,8 @@ function bgroupSect(g, all, pots) {
       <label class="tick bgtick"><input type="checkbox" data-bgroup-total="${g.id}"${g.inTotal ? " checked" : ""}> Count in the totals</label>
       <label class="tick bgtick"><input type="checkbox" data-bgroup-monthly="${g.id}"${g.monthlyOnly ? " checked" : ""}> Monthly only</label>
     </div>
-    ${gl.some((l) => yearlyOf(l) != null) ? `<p class="bgyear">Regular items come to <b>${esc(gbp.format(Math.round(gl.reduce((s, l) => s + (yearlyOf(l) ?? 0), 0) * 100) / 100))}</b> a year</p>` : ""}
+    ${potSum ? potSummaryBox(potSum) : ""}
+    ${!potSum && gl.some((l) => yearlyOf(l) != null) ? `<p class="bgyear">Regular items come to <b>${esc(gbp.format(Math.round(gl.reduce((s, l) => s + (yearlyOf(l) ?? 0), 0) * 100) / 100))}</b> a year</p>` : ""}
     ${hidden.length ? `<div class="bghidden"><p>${hidden.length} one-off${hidden.length === 1 ? "" : "s"} hidden (${esc(gbp.format(sum(hidden)))}), not in the totals:</p><ul>${hidden.map((l) => `<li><span>${esc(l.name)}</span><span>${esc(gbp.format(l.amount))}</span></li>`).join("")}</ul></div>` : ""}
     ${pots.length || budgetEdit === `new-pot-${g.id}` ? `<h4 class="bgsub">Coming in</h4>${potList(g, pots, gl)}<h4 class="bgsub">Going out</h4>${lineList(g.id, gl)}`
       : `${lineList(g.id, gl)}${potList(g, pots, gl)}`}` : ""}
