@@ -316,9 +316,9 @@ function vehicleBlock(v, gs) {
 /* ---------- Monthly budget ---------- */
 
 function focusLineForm() {
-  const input = $(".lform .lname");
+  const input = $(".lform.shop .spin-place") || $(".lform .lname");
   input?.focus();
-  input?.select();
+  input?.select?.();
 }
 const monthLabel = (m) => new Date(dayNum(m) * 86400000).toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
 const monthLines = (m) => lines.filter((l) => l.month === m).sort((a, b) => a.position - b.position);
@@ -336,7 +336,9 @@ const shownLine = (l) => !(isOneOff(l) && bgroupOf(l)?.monthlyOnly);
 const countedLine = (l) => l.kind === "out" && shownLine(l) && (!bgroupOf(l) || bgroupOf(l).inTotal);
 const REPEAT = '<path d="M17 2.5 20.5 6 17 9.5"></path><path d="M3.5 11.5V10a4 4 0 0 1 4-4h13M7 21.5 3.5 18 7 14.5"></path><path d="M20.5 12.5V14a4 4 0 0 1-4 4h-13"></path>';
 const isTermly = (l) => l.frequency === "termly";
-const freqMark = (l) => (isOneOff(l) ? `<span class="lfreq once">One-off</span>` : isTermly(l) ? `<span class="lfreq term">Termly</span>`
+/* Food (and any line that already has shops) opens as a shopping list, not a normal bill form. */
+const isShop = (l) => !!l && (/\bfood\b/i.test(l.name || "") || spends.some((s) => s.lineId === l.id));
+const freqMark = (l) => (isShop(l) ? "" : isOneOff(l) ? `<span class="lfreq once">One-off</span>` : isTermly(l) ? `<span class="lfreq term">Termly</span>`
   : `<span class="lfreq" title="Monthly">${svg(REPEAT)}<span class="sr">Monthly</span></span>`);
 const termsTotal = (terms) => Math.round((terms || []).reduce((s, t) => s + t, 0) * 100) / 100;
 /* What a regular line costs over a year: twelve months, or its terms added up. One-offs have no yearly figure. */
@@ -475,7 +477,8 @@ function readPlan(form) {
     from: r.querySelector(".pfrom").value, to: r.querySelector(".pto").value, amount: toNum(r.querySelector(".pamt").value),
   })).filter((s) => s.from && s.to && s.amount != null && s.to >= s.from).sort((a, b) => a.from.localeCompare(b.from));
 }
-const spendsOf = (l) => spends.filter((s) => s.lineId === l.id).sort((a, b) => a.position - b.position);
+const spendsOf = (l) => spends.filter((s) => s.lineId === l.id)
+  .sort((a, b) => (b.on || "").localeCompare(a.on || "") || b.position - a.position);
 function spendTally(l) {
   const ss = spendsOf(l);
   if (!ss.length) return null;
@@ -484,15 +487,16 @@ function spendTally(l) {
 }
 function spendLine(l) {
   const t = spendTally(l);
-  if (!t) return "";
+  if (!t) return isShop(l) ? `<span class="lsub spend">Nothing spent yet of ${esc(gbp.format(l.amount))}</span>` : "";
   const pct = l.amount > 0 ? Math.min(100, (t.spent / l.amount) * 100) : 100;
   return `<span class="lsub spend${t.diff > 0 ? " over" : ""}">${esc(gbp.format(t.spent))} spent of ${esc(gbp.format(l.amount))} · <b>${t.diff > 0
     ? `${esc(gbp.format(t.diff))} over` : `${esc(gbp.format(-t.diff))} left`}</b>${t.pending ? ` (incl. ${esc(gbp.format(t.pending))} pending)` : ""}
     <span class="spbar"><span style="width:${pct.toFixed(1)}%"></span></span></span>`;
 }
 function spendBody(l) {
-  const t = spendTally(l);
+  const t = spendTally(l), month = l.month || budgetMonth;
   const rows = (t?.ss || []).map((s) => `<li class="sprow${s.pending ? " pending" : ""}">
+      <span class="spdate">${s.on ? prettyDate(s.on, s.on.slice(0, 4) !== month.slice(0, 4)) : "—"}</span>
       <span class="spplace">${esc(s.place)}</span>
       ${s.pending ? `<button class="chip" type="button" data-spend-clear="${s.id}" title="Tap when it has gone through">Pending</button>` : ""}
       <span class="spamt">${esc(gbp.format(s.amount))}</span>
@@ -500,9 +504,12 @@ function spendBody(l) {
     </li>`).join("");
   const total = t ? `<p class="sptot${t.diff > 0 ? " over" : ""}">Spent <b>${esc(gbp.format(t.spent))}</b> of ${esc(gbp.format(l.amount))} budgeted: <b>${t.diff > 0
     ? `${esc(gbp.format(t.diff))} over budget` : t.diff < 0 ? `${esc(gbp.format(-t.diff))} under budget` : "exactly on budget"}</b>${t.pending
-    ? `<br>Includes ${esc(gbp.format(t.pending))} still pending` : ""}</p>` : `<p class="hint">Add each shop as you spend, to see if it fits the budget.</p>`;
+    ? `<br>Includes ${esc(gbp.format(t.pending))} still pending` : ""}</p>`
+    : `<p class="hint">Add each shop with the date, where it was and how much.</p>`;
   return `${total}<ul class="splist">${rows}</ul>
     <div class="spadd">
+      <label class="sr" for="sp-on-${l.id}">Date</label>
+      <input type="date" id="sp-on-${l.id}" class="spin-on" value="${todayIso()}">
       <label class="sr" for="sp-place-${l.id}">Where</label>
       <input type="text" id="sp-place-${l.id}" class="spin-place" maxlength="80" placeholder="Where, e.g. Tesco" autocomplete="off">
       <label class="sr" for="sp-amt-${l.id}">Amount (£)</label>
@@ -511,13 +518,6 @@ function spendBody(l) {
       <button class="btn" type="button" data-spend-add="${l.id}">Add</button>
     </div>`;
 }
-function spendPicker(l) {
-  if (!l || l.kind !== "out") return "";
-  return `<details class="lspend"${spendsOf(l).length ? " open" : ""}>
-    <summary>What we've spent</summary>
-    <div class="spbody">${spendBody(l)}</div>
-  </details>`;
-}
 function refreshSpends(lineId) {
   const box = $(`[data-line-form="${lineId}"] .spbody`), l = lines.find((x) => x.id === lineId);
   if (box && l) box.innerHTML = spendBody(l);
@@ -525,11 +525,15 @@ function refreshSpends(lineId) {
 async function addSpend(lineId) {
   const box = $(`[data-line-form="${lineId}"] .spadd`);
   const place = box.querySelector(".spin-place").value.trim(), amount = toNum(box.querySelector(".spin-amt").value);
+  const on = box.querySelector(".spin-on")?.value || todayIso();
   if (!place || amount == null) { box.querySelector(place ? ".spin-amt" : ".spin-place").focus(); return; }
-  const s = { id: uid(), householdId: household.id, lineId, place, amount, pending: box.querySelector(".spin-pend").checked, position: Date.now() };
+  const s = { id: uid(), householdId: household.id, lineId, place, amount, pending: box.querySelector(".spin-pend").checked, position: Date.now(), on };
   spends.push(s);
   refreshSpends(lineId);
-  $(`#sp-place-${lineId}`)?.focus();
+  const placeIn = $(`#sp-place-${lineId}`);
+  if (placeIn) { placeIn.value = ""; placeIn.focus(); }
+  const amtIn = $(`#sp-amt-${lineId}`);
+  if (amtIn) amtIn.value = "";
   try { await store.addSpend(s); } catch (err) { fail(err); await reload(); }
 }
 /* Money into a group, like DLA, pays towards outgoings in the same month: its funds list each one and how much. */
@@ -569,13 +573,35 @@ function potBox(p, outs) {
     </div>` : `<p class="hint">Add the outgoings first, then link them here.</p>`}
   </div>`;
 }
+/* Only Vikki's group (or a group that already has money in) offers a DLA-style "money in" line. */
+const canHavePot = (g) => /vikki/i.test(g.name) || lines.some((l) => l.kind === "in" && l.groupId === g.id);
 function potList(g, pots, outs) {
+  if (!canHavePot(g) && !pots.length) return "";
   const slot = `pot-${g.id}`, adding = budgetEdit === `new-${slot}`;
   const rows = pots.map((p) => budgetEdit === p.id ? `<li>${lineForm(slot, p)}</li>` : `<li class="pot">${lineRowBtn(p)}${potBox(p, outs)}</li>`).join("");
   return `${pots.length || adding ? `<ul class="llist pots">${rows}${adding ? `<li>${lineForm(slot)}</li>` : ""}</ul>` : ""}
-    ${adding ? "" : `<button class="btn quiet ladd" type="button" data-line-new="${slot}">+ Money in${pots.length ? "" : ", like DLA"}</button>`}`;
+    ${adding || !canHavePot(g) ? "" : `<button class="btn quiet ladd" type="button" data-line-new="${slot}">+ Money in${pots.length ? "" : ", like DLA"}</button>`}`;
+}
+function shopForm(slot, l) {
+  const id = l.id;
+  return `<form class="lform shop" data-line-form="${id}" data-slot="${slot}">
+    <p class="shoptitle">Shopping budget for ${esc(monthLabel(l.month))}</p>
+    <label>Monthly budget (£)<input type="number" id="la-${id}" class="lamt" inputmode="decimal" min="0" step="0.01" value="${l.amount}" required></label>
+    <input type="hidden" class="lname" value="${esc(l.name)}">
+    <input type="hidden" name="fq-${id}" value="monthly" checked>
+    <div class="shopbox">
+      <h4>Shops this month</h4>
+      <div class="spbody">${spendBody(l)}</div>
+    </div>
+    <div class="row">
+      <button class="btn primary" type="submit">Save budget</button>
+      <button class="btn danger" type="button" data-line-delete="${l.id}">Delete</button>
+      <button class="btn quiet" type="button" data-line-cancel>Done</button>
+    </div>
+  </form>`;
 }
 function lineForm(slot, l) {
+  if (l && isShop(l) && l.kind === "out") return shopForm(slot, l);
   const kind = slotKind(slot);
   const id = l ? l.id : `new-${slot}`;
   return `<form class="lform" data-line-form="${id}" data-slot="${slot}">
@@ -591,7 +617,6 @@ function lineForm(slot, l) {
     ${termsBox(id, l)}
     <label class="sr" for="lnote-${id}">Note</label>
     <input type="text" id="lnote-${id}" class="lnote" maxlength="200" placeholder="Note, e.g. renews 30 Nov at £7.00" value="${esc(l?.note)}" autocomplete="off">
-    ${spendPicker(l)}
     ${datesPicker(id, l)}
     ${planPicker(l)}
     ${iconPicker(id, l, kind)}
@@ -1342,20 +1367,32 @@ document.addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = lf.querySelector(".lname").value.trim();
     const id = lf.dataset.lineForm, slot = lf.dataset.slot;
+    const existing = lines.find((l) => l.id === id);
+    if (lf.classList.contains("shop") && existing) {
+      const amount = toNum(lf.querySelector(".lamt").value);
+      if (amount == null) return;
+      budgetEdit = null;
+      try {
+        Object.assign(existing, { amount });
+        renderHome();
+        await store.updateLine(id, { amount });
+        toast(`Food budget is ${gbp.format(amount)} a month`);
+      } catch (err) { fail(err); await reload(); }
+      return;
+    }
     const icon = lf.querySelector(`input[name="ic-${id}"]:checked`)?.value || null;
     const frequency = lf.querySelector(`input[name="fq-${id}"]:checked`)?.value || "monthly";
     const terms = frequency === "termly" ? readTerms(lf) : [];
     if (frequency === "termly" && !terms.length) { toast("Put in what at least one term costs"); lf.querySelector(".tamt")?.focus(); return; }
-    const paidTerms = frequency === "termly" ? (lines.find((l) => l.id === id)?.paidTerms || []).filter((i) => i < terms.length) : [];
+    const paidTerms = frequency === "termly" ? (existing?.paidTerms || []).filter((i) => i < terms.length) : [];
     const amount = frequency === "termly" ? paidOf(terms, paidTerms) : toNum(lf.querySelector(".lamt").value);
     if (!name || amount == null) return;
     const plan = readPlan(lf);
-    const startedOn = lf.querySelector(".lstart").value || plan[0]?.from || null;
-    const endsOn = lf.querySelector(".lend").value || plan.at(-1)?.to || null;
-    const remind = lf.querySelector(".lremind").checked;
-    const note = lf.querySelector(".lnote").value.trim() || null;
+    const startedOn = lf.querySelector(".lstart")?.value || plan[0]?.from || null;
+    const endsOn = lf.querySelector(".lend")?.value || plan.at(-1)?.to || null;
+    const remind = lf.querySelector(".lremind")?.checked !== false;
+    const note = lf.querySelector(".lnote")?.value.trim() || null;
     if (startedOn && endsOn && endsOn < startedOn) { toast("The expiry date is before the start date"); return; }
-    const existing = lines.find((l) => l.id === id);
     budgetEdit = null;
     try {
       if (existing) {
@@ -1989,8 +2026,8 @@ $("#exportBackup").onclick = async () => {
     X.utils.book_append_sheet(wb, sheet([["Month", "In or out", "Group", "What", "Amount (£)", "How often", "In the totals", "Started", "Expires", "Note", "Paid from / to"], ...budget],
       [16, 11, 22, 24, 11, 11, 12, 13, 13, 40, 40]), "Budget lines");
     const spent = [...lines].sort((a, b) => a.month.localeCompare(b.month) || a.position - b.position)
-      .flatMap((l) => spendsOf(l).map((s) => [monthLabel(l.month), l.name, s.place, s.amount, s.pending ? "Yes" : ""]));
-    if (spent.length) X.utils.book_append_sheet(wb, sheet([["Month", "Budget", "Where", "Amount (£)", "Pending"], ...spent], [16, 22, 24, 11, 9]), "Spending");
+      .flatMap((l) => spendsOf(l).map((s) => [monthLabel(l.month), l.name, s.on ? prettyDate(s.on) : "", s.place, s.amount, s.pending ? "Yes" : ""]));
+    if (spent.length) X.utils.book_append_sheet(wb, sheet([["Month", "Budget", "Date", "Where", "Amount (£)", "Pending"], ...spent], [16, 22, 12, 24, 11, 9]), "Spending");
     const saved = accounts.flatMap((acc) => { let run = 0; return movesOf(acc).map((m) => [acc.name, uk(m.on), m.kind === "in" ? "Paid in" : "Taken out",
       m.what || "", signed(m), (run = Math.round((run + signed(m)) * 100) / 100)]); });
     if (saved.length) X.utils.book_append_sheet(wb, sheet([["Account", "Date", "In or out", "What for", "Amount (£)", "Balance (£)"], ...saved], [22, 12, 11, 30, 11, 12]), "Savings");

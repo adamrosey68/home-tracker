@@ -39,7 +39,7 @@ function lineRow(l) {
   if ("endsOn" in l) { r.ends_on = l.endsOn || null; r.reminded = null; }
   return r;
 }
-const toSpend = (r) => ({ id: r.id, householdId: r.household_id, lineId: r.line_id, place: r.place, amount: Number(r.amount), pending: r.pending, position: r.position });
+const toSpend = (r) => ({ id: r.id, householdId: r.household_id, lineId: r.line_id, place: r.place, amount: Number(r.amount), pending: r.pending, position: r.position, on: r.spent_on || null });
 const toKey = (r) => ({ id: r.id, householdId: r.household_id, name: r.name, holders: r.holders || [], note: r.note, photo: r.photo, position: r.position });
 function keyRow(k) {
   const r = {};
@@ -161,9 +161,13 @@ function cloud() {
     async updateMove(id, patch) { ok(await sb.from("savings_moves").update(moveRow(patch)).eq("id", id)); },
     async deleteMove(id) { ok(await sb.from("savings_moves").delete().eq("id", id)); },
     async addSpend(s) {
-      ok(await sb.from("budget_spends").insert({ id: s.id, household_id: s.householdId, line_id: s.lineId, place: s.place, amount: s.amount, pending: s.pending, position: s.position }));
+      ok(await sb.from("budget_spends").insert({ id: s.id, household_id: s.householdId, line_id: s.lineId, place: s.place, amount: s.amount, pending: s.pending, position: s.position, spent_on: s.on }));
     },
-    async updateSpend(id, patch) { ok(await sb.from("budget_spends").update(patch).eq("id", id)); },
+    async updateSpend(id, patch) {
+      const r = { ...patch };
+      if ("on" in r) { r.spent_on = r.on; delete r.on; }
+      ok(await sb.from("budget_spends").update(r).eq("id", id));
+    },
     async deleteSpend(id) { ok(await sb.from("budget_spends").delete().eq("id", id)); },
     async addBudgetGroup(g) { ok(await sb.from("budget_groups").insert({ id: g.id, household_id: g.householdId, ...budgetGroupRow(g) })); },
     async updateBudgetGroup(id, patch) { ok(await sb.from("budget_groups").update(budgetGroupRow(patch)).eq("id", id)); },
