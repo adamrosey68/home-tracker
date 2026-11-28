@@ -363,6 +363,9 @@ ul { list-style: none; margin: 0; padding: 0; }
 .bgpotsum .bgafter { padding-top: 6px; border-top: 1px solid var(--line); }
 .bgpotsum .bgafter .bnum { font-size: 20px; }
 .bgpotsum .note { margin: 2px 0 0; font-size: 12px; }
+.bgclear { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 6px; }
+.bgclear .note { margin: 0; font-size: 12px; }
+.bgclear .btn.confirm { color: var(--danger); }
 .bgroup { background: color-mix(in srgb, var(--a-bills-soft) 35%, transparent); }
 .bgroup.off { background: var(--bg); }
 .bgroup.off .bgsum, .bgroup.off .lamt { color: var(--muted); }

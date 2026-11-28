@@ -40,11 +40,16 @@ let keys = [];
 let keyEdit = null, keyDeleteArmed = false, keyPhoto = null;
 const photoUrls = new Map();
 let budgetMonth = null;
+/* True once they've picked a month this session; until then Bills always opens on the calendar month. */
+let budgetMonthPicked = false;
+const thisBudgetMonth = () => todayIso().slice(0, 8) + "01";
 /* Which budget line form is open: a line id, "new-in", "new-out" or "new-<groupId>". */
 let budgetEdit = null;
 /* Which budget group's name form is open: a group id or "new". */
 let bgroupEdit = null;
 let bgroupDeleteArmed = false;
+/* Two-tap clear of amounts in a group (names stay): the group id being confirmed, or null. */
+let bgroupClearArmed = null;
 const openHistory = new Set();
 const UI_KEY = "home-tracker-ui";
 const ui = (() => { try { return JSON.parse(localStorage.getItem(UI_KEY)) || {}; } catch { return {}; } })();
@@ -700,6 +705,9 @@ function bgroupSect(g, all, pots) {
     </div>
     ${potSum ? potSummaryBox(potSum) : ""}
     ${!potSum && gl.some((l) => yearlyOf(l) != null) ? `<p class="bgyear">Regular items come to <b>${esc(gbp.format(Math.round(gl.reduce((s, l) => s + (yearlyOf(l) ?? 0), 0) * 100) / 100))}</b> a year</p>` : ""}
+    ${gl.length ? `<div class="bgclear"><button class="btn quiet${bgroupClearArmed === g.id ? " confirm" : ""}" type="button" data-bgroup-clear="${g.id}">${bgroupClearArmed === g.id
+      ? "Tap again to clear all amounts (names stay)" : "Clear amounts"}</button>
+      <span class="note">Sets each going-out amount to £0. Keeps the names${pots.length ? " and money in (like DLA)" : ""}.</span></div>` : ""}
     ${hidden.length ? `<div class="bghidden"><p>${hidden.length} one-off${hidden.length === 1 ? "" : "s"} hidden (${esc(gbp.format(sum(hidden)))}), not in the totals:</p><ul>${hidden.map((l) => `<li><span>${esc(l.name)}</span><span>${esc(gbp.format(l.amount))}</span></li>`).join("")}</ul></div>` : ""}
     ${pots.length || budgetEdit === `new-pot-${g.id}` ? `<h4 class="bgsub">Coming in</h4>${potList(g, pots, gl)}<h4 class="bgsub">Going out</h4>${lineList(g.id, gl)}`
       : `${lineList(g.id, gl)}${potList(g, pots, gl)}`}` : ""}
@@ -1068,6 +1076,7 @@ $("#list").addEventListener("change", async (e) => {
   }
   if (!e.target.matches("[data-month-pick]")) return;
   budgetMonth = e.target.value;
+  budgetMonthPicked = true;
   budgetEdit = null;
   renderHome();
 });
@@ -1162,7 +1171,30 @@ document.addEventListener("click", async (e) => {
     return input?.select();
   }
   if (t("[data-price-cancel]")) { pricing = null; return renderHome(); }
-  if ((b = t("[data-month]"))) { budgetMonth = addMonths(budgetMonth, Number(b.dataset.month)); budgetEdit = null; return renderHome(); }
+  if ((b = t("[data-month]"))) {
+    budgetMonth = addMonths(budgetMonth, Number(b.dataset.month));
+    budgetMonthPicked = true;
+    budgetEdit = null;
+    return renderHome();
+  }
+  if ((b = t("[data-bgroup-clear]"))) {
+    const id = b.dataset.bgroupClear, g = budgetGroups.find((x) => x.id === id);
+    if (bgroupClearArmed !== id) { bgroupClearArmed = id; return renderHome(); }
+    const outs = monthLines(budgetMonth).filter((l) => l.groupId === id && l.kind === "out");
+    const goneSpends = spends.filter((s) => outs.some((l) => l.id === s.lineId));
+    for (const l of outs) Object.assign(l, { amount: 0, paidTerms: [] });
+    spends = spends.filter((s) => !goneSpends.includes(s));
+    bgroupClearArmed = null;
+    renderHome();
+    try {
+      await Promise.all([
+        ...outs.map((l) => store.updateLine(l.id, { amount: 0, paidTerms: [] })),
+        ...goneSpends.map((s) => store.deleteSpend(s.id)),
+      ]);
+      toast(`Cleared amounts in ${g.name}`);
+    } catch (err) { fail(err); await reload(); }
+    return;
+  }
   if ((b = t("[data-month-copy]"))) {
     const ids = new Map();
     const copy = monthLines(b.dataset.monthCopy).filter((l) => !isOneOff(l)).map((l, n) => {
@@ -2171,7 +2203,8 @@ $("#authForm").addEventListener("submit", async (e) => {
 async function reload() {
   household = await store.household();
   ({ items, groups, vehicles, lines, budgetGroups, spends, accounts, moves, keys } = await store.load(household.id));
-  budgetMonth ??= todayIso().slice(0, 8) + "01";
+  if (!budgetMonthPicked) budgetMonth = thisBudgetMonth();
+  else budgetMonth ??= thisBudgetMonth();
   if (!$("#home").hidden) {
     /* Syncing redraws the list, so keep anything half-typed in a spending row and where the cursor was. */
     const typed = [...document.querySelectorAll(".spadd input, .fdadd select, .fdadd input, .kform input[type=text]")].map((i) => [i.id, i.type === "checkbox" ? i.checked : i.value]);
@@ -2220,6 +2253,14 @@ async function start(s) {
   show("home");
   await acceptInvite();
   store.subscribe(() => { clearTimeout(syncTimer); syncTimer = setTimeout(() => reload().catch(console.warn), 400); });
+  /* If the calendar moves into a new month and they haven't picked one, Bills jumps to that month. */
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState !== "visible" || budgetMonthPicked || $("#home").hidden) return;
+    const m = thisBudgetMonth();
+    if (budgetMonth === m) return;
+    budgetMonth = m;
+    renderHome();
+  });
   push.resync(store);
   const want = new URLSearchParams(location.search).get("item");
   if (want) openItem(want);
@@ -2231,6 +2272,7 @@ function openLine(id) {
   const l = lines.find((x) => x.id === id);
   if (!l) return;
   budgetMonth = l.month;
+  budgetMonthPicked = true;
   budgetEdit = l.id;
   if (closedAreas.has("bills")) toggle(closedAreas, "bills");
   renderHome();
